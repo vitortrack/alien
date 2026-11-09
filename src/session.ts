@@ -8,6 +8,7 @@ import { trackaiHome } from './paths.js';
 import { OllamaProvider } from './providers/ollama.js';
 import { CodeIndex, Embedder } from './rag.js';
 import { workspaceDiff } from './scope.js';
+import { newSessionId, SessionStore, type SavedSession, type Turn } from './sessions.js';
 import { clip, type Mode, type PlanItem, type ToolContext } from './tools.js';
 import type { Provider, Usage } from './types.js';
 import type { AgentUI } from './agent-ui.js';
@@ -67,6 +68,10 @@ export class Session {
   readonly codeIndex: CodeIndex;
   readonly memory: MemoryStore;
   readonly allowed = new Set<string>();
+  readonly sessions: SessionStore;
+  id = newSessionId();
+  turns: Turn[] = [];
+  private created = new Date().toISOString();
 
   constructor(
     readonly cfg: Config,
@@ -76,6 +81,7 @@ export class Session {
     const embedder = new Embedder(cfg.embedModel);
     this.codeIndex = new CodeIndex(cfg.root, embedder);
     this.memory = new MemoryStore(cfg.root, embedder);
+    this.sessions = new SessionStore(cfg.root);
     this.main = new Agent(this, 'main', ui);
     this.logFile = cfg.logDir ? path.join(cfg.logDir, `${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`) : null;
     if (cfg.logDir) fs.mkdirSync(cfg.logDir, { recursive: true });
@@ -166,7 +172,51 @@ export class Session {
   }
 
   run(task: string): Promise<string> {
-    return this.track(() => this.main.run(task));
+    return this.track(async () => {
+      const answer = await this.main.run(task);
+      this.turns.push({ task, answer });
+      this.save();
+      return answer;
+    });
+  }
+
+  save(): void {
+    try {
+      this.sessions.save({
+        id: this.id,
+        title: this.turns[0]?.task.slice(0, 80) ?? '',
+        created: this.created,
+        updated: new Date().toISOString(),
+        provider: this.cfg.provider,
+        model: this.cfg.model,
+        turns: this.turns,
+        plan: this.plan,
+        usage: this.usage,
+        history: this.main.snapshot(),
+      });
+    } catch (e) {
+      this.ui.warn(`não foi possível salvar a sessão: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  resume(saved: SavedSession): string | null {
+    if (saved.provider !== this.cfg.provider) {
+      return `A sessão ${saved.id} foi feita com ${saved.provider}; use --provider ${saved.provider} para retomá-la.`;
+    }
+    this.main = new Agent(this, 'main', this.ui);
+    this.main.restore(saved.history);
+    this.id = saved.id;
+    this.created = saved.created;
+    this.turns = [...saved.turns];
+    this.plan = saved.plan;
+    Object.assign(this.usage, saved.usage);
+    return null;
+  }
+
+  fork(): void {
+    this.id = newSessionId();
+    this.created = new Date().toISOString();
+    this.save();
   }
 
   async track<T>(work: () => Promise<T>): Promise<T> {
@@ -187,5 +237,8 @@ export class Session {
     this.main = new Agent(this, 'main', this.ui);
     this.plan = [];
     this.allowed.clear();
+    this.id = newSessionId();
+    this.created = new Date().toISOString();
+    this.turns = [];
   }
 }

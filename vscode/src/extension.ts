@@ -5,6 +5,7 @@ import type { AgentUI } from '../../src/agent-ui.js';
 import { bestOf } from '../../src/attempts.js';
 import { orchestrate } from '../../src/orchestrator.js';
 import { DEFAULT_EMBED_MODEL, DEFAULT_MODEL, Session, type Config, type ProviderName } from '../../src/session.js';
+import { SessionStore } from '../../src/sessions.js';
 import { THINKING_WORDS } from '../../src/thinking-words.js';
 import type { Decision, Mode, PlanItem } from '../../src/tools.js';
 
@@ -107,12 +108,17 @@ function readConfig(root: string): Config {
   };
 }
 
+const OPEN_SESSION = 'trackai.openSession';
+
 class ChatViewProvider implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
   private session: Session | undefined;
   private readonly pending: Pending = new Map();
 
-  constructor(private readonly extensionUri: vscode.Uri) {}
+  constructor(
+    private readonly extensionUri: vscode.Uri,
+    private readonly state: vscode.Memento,
+  ) {}
 
   private readonly post: Post = (message) => {
     void this.view?.webview.postMessage(message);
@@ -168,7 +174,19 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
   newChat(): void {
     this.session?.abort();
     this.session = undefined;
+    void this.state.update(OPEN_SESSION, undefined);
     this.post({ type: 'cleared' });
+  }
+
+  private restore(root: string): void {
+    const id = this.state.get<string>(OPEN_SESSION);
+    if (!this.session && id) {
+      const saved = new SessionStore(root).load(id);
+      const session = saved && this.ensureSession();
+      if (saved && session && session.resume(saved) !== null) this.session = undefined;
+    }
+    const session = this.session;
+    if (session?.turns.length) this.post({ type: 'restored', id: session.id, turns: session.turns, plan: session.plan });
   }
 
   private ensureSession(): Session | null {
@@ -195,6 +213,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
         if (root) {
           const cfg = readConfig(root);
           this.post({ type: 'status', text: `${cfg.provider} · ${cfg.model} · ${cfg.mode}` });
+          this.restore(root);
         }
         return;
       }
@@ -232,7 +251,10 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
         const result = await session.track(() => bestOf(session.cfg, session.ui, task, 3, undefined, session.signal));
         session.addUsage(result.usage);
         out = result.answer;
-      } else out = await session.run(task);
+      } else {
+        out = await session.run(task);
+        void this.state.update(OPEN_SESSION, session.id);
+      }
       if (STOP_PREFIXES.some((p) => out.startsWith(p))) this.post({ type: 'warn', message: out });
       else this.post({ type: 'answer', text: out });
     } catch (e) {
@@ -269,7 +291,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
-  const provider = new ChatViewProvider(context.extensionUri);
+  const provider = new ChatViewProvider(context.extensionUri, context.workspaceState);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('trackai.chat', provider, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.commands.registerCommand('trackai.newChat', () => provider.newChat()),

@@ -29,6 +29,14 @@ class ScriptedProvider implements Provider {
   addToolResults(results: ToolResult[]): void {
     this.results.push(results);
   }
+  snapshot(): unknown {
+    return { user: this.user, results: this.results };
+  }
+  restore(state: unknown): void {
+    const s = state as { user: string[]; results: ToolResult[][] };
+    this.user.splice(0, this.user.length, ...s.user);
+    this.results.splice(0, this.results.length, ...s.results);
+  }
   async step(): Promise<StepResult> {
     const next = this.script[this.turn++];
     if (!next) throw new Error('script exhausted');
@@ -277,4 +285,26 @@ test('ambiguity rule: ask in interactive chat, decide alone otherwise', () => {
   assert.match(systemPrompt('main', root, 'pt-BR', false), /nobody is available to answer: choose the smaller option/);
   assert.match(systemPrompt('worker', root, 'pt-BR', true), /nobody is available to answer/);
   assert.doesNotMatch(systemPrompt('main', root, 'pt-BR', true), /INTERACTIVE_RULE/);
+});
+
+test('sessions are saved after each task, resumed with their history and forked under a new id', async () => {
+  const root = workspace();
+  const ui = UI.create();
+  const first = new Session(config(root), ui, () => new ScriptedProvider([() => answer('primeira resposta')]));
+  await first.run('primeira tarefa');
+
+  const resumedProvider = new ScriptedProvider([({ user }) => answer(`vi ${user.length} mensagens`)]);
+  const second = new Session(config(root), ui, () => resumedProvider);
+  const saved = second.sessions.latest()!;
+  assert.equal(saved.id, first.id);
+  assert.deepEqual(saved.turns, [{ task: 'primeira tarefa', answer: 'primeira resposta' }]);
+  assert.equal(second.resume(saved), null);
+  assert.equal(await second.run('segunda tarefa'), 'vi 2 mensagens');
+  assert.equal(second.sessions.load(first.id)!.turns.length, 2);
+
+  second.fork();
+  assert.notEqual(second.id, first.id);
+  assert.equal(second.sessions.load(second.id)!.turns.length, 2);
+  assert.match(new Session(config(root, { provider: 'anthropic' }), ui, () => new ScriptedProvider([])).resume(saved)!, /--provider ollama/);
+  ui.close();
 });

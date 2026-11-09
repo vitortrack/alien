@@ -73,8 +73,13 @@ trackai -p anthropic --effort xhigh "investigue o vazamento de memória"
 | `--lang <idioma>` | idioma de tudo o que o agente escreve: `pt-BR` (padrão), `en`, `es`, `fr`, `de`, `it` ou `auto` (o da pergunta) |
 | `--thinking` | mostra o raciocínio do modelo (por padrão aparece só "✻ pensando…") |
 | `--no-log` | não grava o trace da sessão |
+| `-c`, `--continue` | retoma a última conversa deste projeto |
+| `-r`, `--resume <id>` | retoma uma conversa salva |
+| `--fork` | com `-c` ou `-r`: continua numa cópia, sem alterar a original |
 
-Comandos no modo interativo: `/plan`, `/mode`, `/review on|off`, `/lang <idioma>`, `/traduzir [idioma]`, `/thinking on|off`, `/orchestrate <tarefa>`, `/index`, `/memory`, `/usage`, `/clear`, `/exit`. **Ctrl+C** interrompe a tarefa em andamento sem sair.
+Comandos no modo interativo: `/plan`, `/mode`, `/review on|off`, `/lang <idioma>`, `/traduzir [idioma]`, `/thinking on|off`, `/orchestrate <tarefa>`, `/index`, `/memory`, `/usage`, `/sessions`, `/resume <id>`, `/fork`, `/clear`, `/exit`. **Ctrl+C** interrompe a tarefa em andamento sem sair.
+
+Cada conversa é salva ao fim de cada tarefa em `~/.trackai/projects/<projeto>/sessions/<id>.json` (histórico do agente, pedidos e respostas, plano e uso). A extensão do VS Code restaura a conversa aberta quando a janela recarrega; **Nova conversa** começa outra.
 
 ### Fazendo perguntas
 

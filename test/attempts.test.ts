@@ -23,7 +23,7 @@ const done = (text: string): StepResult => ({ text, toolCalls: [], stop: 'end', 
 
 function scripted(steps: StepResult[]): Provider {
   let i = 0;
-  return { addUser() {}, addToolResults(_r: ToolResult[]) {}, step: async () => steps[i++] ?? done('fim') };
+  return { addUser() {}, addToolResults(_r: ToolResult[]) {}, snapshot: () => null, restore() {}, step: async () => steps[i++] ?? done('fim') };
 }
 
 test('pickBest prefers finished, tested, smallest diffs', () => {

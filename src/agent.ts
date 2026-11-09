@@ -46,6 +46,14 @@ export class Agent {
     this.tools = allTools.filter(ROLE_TOOLS[role]);
   }
 
+  snapshot(): unknown {
+    return this.provider.snapshot();
+  }
+
+  restore(state: unknown): void {
+    this.provider.restore(state);
+  }
+
   private get system(): string {
     const { root, lang, interactive = false } = this.session.cfg;
     const key = `${lang}|${interactive}`;

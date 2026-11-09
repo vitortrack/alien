@@ -56,4 +56,6 @@ export interface Provider {
   addUser(text: string): void;
   addToolResults(results: ToolResult[]): void;
   step(req: StepRequest): Promise<StepResult>;
+  snapshot(): unknown;
+  restore(state: unknown): void;
 }

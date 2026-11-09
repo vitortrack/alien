@@ -76,6 +76,15 @@ export class OllamaProvider implements Provider {
     this.history.push({ role: 'user', content: text });
   }
 
+  snapshot(): unknown {
+    return { history: this.history };
+  }
+
+  restore(state: unknown): void {
+    this.history = [...((state as { history?: OllamaMessage[] })?.history ?? [])];
+    this.lastPromptTokens = 0;
+  }
+
   addToolResults(results: ToolResult[]): void {
     for (const r of results) {
       this.history.push({ role: 'tool', tool_name: r.name, content: r.isError ? `ERROR: ${r.output}` : r.output });

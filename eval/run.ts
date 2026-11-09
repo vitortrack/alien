@@ -69,6 +69,8 @@ function setup(s: Scenario): string {
 function recording(inner: Provider, trace: Trace): Provider {
   return {
     addUser: (text) => inner.addUser(text),
+    snapshot: () => inner.snapshot(),
+    restore: (state) => inner.restore(state),
     addToolResults: (results: ToolResult[]) => {
       for (const r of results) if (r.isError) trace.toolErrors[r.name] = (trace.toolErrors[r.name] ?? 0) + 1;
       inner.addToolResults(results);

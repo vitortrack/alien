@@ -307,6 +307,16 @@
       case 'status':
         statusEl.textContent = m.text;
         break;
+      case 'restored':
+        messages.querySelector('.welcome')?.remove();
+        messages.innerHTML = '';
+        for (const turn of m.turns) {
+          add('msg user', esc(turn.task).replace(/\n/g, '<br>'));
+          add('msg assistant', markdown(turn.answer));
+        }
+        renderPlan(m.plan ?? []);
+        add('notice info', `Conversa anterior restaurada (${esc(m.id)}). Continue de onde parou ou clique em Nova conversa.`);
+        break;
       case 'cleared':
         finishWork('stopped');
         messages.innerHTML = '';

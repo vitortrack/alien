@@ -16,6 +16,14 @@ export class AnthropicProvider implements Provider {
     this.history.push({ role: 'user', content: text });
   }
 
+  snapshot(): unknown {
+    return { history: this.history };
+  }
+
+  restore(state: unknown): void {
+    this.history.splice(0, this.history.length, ...((state as { history?: Anthropic.Beta.BetaMessageParam[] })?.history ?? []));
+  }
+
   addToolResults(results: ToolResult[]): void {
     this.history.push({
       role: 'user',

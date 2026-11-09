@@ -33,6 +33,9 @@ Opções:
       --lang <idioma>                idioma das respostas e interações: pt-BR, en, es, fr, de, it, auto (padrão: pt-BR)
       --thinking                     mostra o raciocínio do modelo (padrão: escondido)
       --no-log                       não grava o trace em ~/.trackai/sessions
+  -c, --continue                     retoma a última conversa deste projeto
+  -r, --resume <id>                  retoma uma conversa salva (veja /sessions)
+      --fork                         com -c ou -r: continua numa cópia, sem alterar a original
   -h, --help
 
 Variáveis: OLLAMA_HOST, ANTHROPIC_API_KEY, TRACKAI_MODEL, TRACKAI_EMBED_MODEL, TRACKAI_LANG`;
@@ -48,6 +51,9 @@ const COMMANDS = `Comandos:
   /index                   indexa (ou atualiza) o código para o RAG
   /memory                  lista a memória de longo prazo do projeto
   /usage                   tokens e custo da sessão
+  /sessions                lista as conversas salvas deste projeto
+  /resume <id>             retoma uma conversa salva
+  /fork                    continua numa cópia da conversa atual
   /clear                   começa uma conversa nova
   /exit`;
 
@@ -78,7 +84,7 @@ function validLang(value: string, flag: string): string {
   return value;
 }
 
-function parseConfig(): { cfg: Config; task: string; orchestrateTask: boolean; showThinking: boolean; attempts: number } {
+function parseConfig(): { cfg: Config; task: string; orchestrateTask: boolean; showThinking: boolean; attempts: number; resumeId: string | undefined; fork: boolean } {
   let parsed;
   try {
     parsed = parseArgs({
@@ -99,6 +105,9 @@ function parseConfig(): { cfg: Config; task: string; orchestrateTask: boolean; s
         'no-log': { type: 'boolean' },
         lang: { type: 'string' },
         thinking: { type: 'boolean' },
+        continue: { type: 'boolean', short: 'c' },
+        resume: { type: 'string', short: 'r' },
+        fork: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
       },
     });
@@ -134,13 +143,29 @@ function parseConfig(): { cfg: Config; task: string; orchestrateTask: boolean; s
     orchestrateTask: Boolean(values.orchestrate),
     showThinking: Boolean(values.thinking),
     attempts: Math.max(1, positiveInt(values.attempts, '--attempts', 1)),
+    resumeId: values.resume ?? (values.continue ? 'latest' : undefined),
+    fork: Boolean(values.fork),
   };
 }
 
 async function main(): Promise<void> {
-  const { cfg, task, orchestrateTask, showThinking, attempts } = parseConfig();
+  const { cfg, task, orchestrateTask, showThinking, attempts, resumeId, fork } = parseConfig();
   const ui = UI.create(showThinking);
   const session = new Session(cfg, ui);
+  const resume = (id: string, asFork: boolean): string | null => {
+    const saved = id === 'latest' ? session.sessions.latest() : session.sessions.load(id);
+    if (!saved) return id === 'latest' ? 'nenhuma conversa salva neste projeto' : `conversa "${id}" não encontrada (veja /sessions)`;
+    const problem = session.resume(saved);
+    if (problem) return problem;
+    if (asFork) session.fork();
+    ui.info(`${asFork ? `cópia ${session.id} da conversa` : 'conversa retomada:'} ${saved.id} · ${saved.turns.length} tarefa(s) · "${saved.title}"`);
+    return null;
+  };
+  if (fork && !resumeId) fail('--fork precisa de -c ou -r <id>.');
+  if (resumeId) {
+    const problem = resume(resumeId, fork);
+    if (problem) fail(problem);
+  }
 
   ui.onInterrupt(() => {
     if (session.busy) {
@@ -273,6 +298,22 @@ async function main(): Promise<void> {
       }
       case '/usage':
         ui.usage(session.usage, session.costUsd());
+        break;
+      case '/sessions': {
+        const saved = session.sessions.list();
+        if (!saved.length) ui.info('nenhuma conversa salva neste projeto');
+        for (const s of saved) ui.final(`${s.id === session.id ? '*' : ' '} ${s.id}  ${s.updated.slice(0, 16).replace('T', ' ')}  ${s.turns.length} tarefa(s)  ${s.title}`);
+        break;
+      }
+      case '/resume': {
+        if (session.busy) break;
+        const problem = arg ? resume(arg, false) : 'informe o id (veja /sessions)';
+        if (problem) ui.warn(problem);
+        break;
+      }
+      case '/fork':
+        session.fork();
+        ui.info(`agora numa cópia: ${session.id}`);
         break;
       case '/clear':
         session.reset();
