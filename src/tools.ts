@@ -218,6 +218,18 @@ async function ensureFresh(ctx: ToolContext, file: string, shown: string, conten
   }
 }
 
+const NUMBERED = /^(\d+)[-_]/;
+
+async function numberingWarning(file: string): Promise<string> {
+  const own = path.basename(file).match(NUMBERED)?.[1];
+  if (!own) return '';
+  const siblings = (await fs.readdir(path.dirname(file)).catch(() => [] as string[])).filter((f) => f !== path.basename(file));
+  const taken = siblings.filter((f) => f.match(NUMBERED)?.[1] === own);
+  if (!taken.length) return '';
+  const next = Math.max(...siblings.map((f) => Number(f.match(NUMBERED)?.[1] ?? 0))) + 1;
+  return `\nWarning: the number ${own} is already used by ${taken.join(', ')} in this directory; the next free number is ${String(next).padStart(own.length, '0')}. Rename this file unless sharing the number is intended.`;
+}
+
 async function guardedWrite(ctx: ToolContext, file: string, shown: string, before: string | null, after: string): Promise<string> {
   const broken = await syntaxError(file, after);
   if (broken && before !== null && !(await syntaxError(file, before))) {
@@ -355,7 +367,8 @@ export const allTools: Tool[] = [
       const crlf = before !== null && before.includes('\r\n');
       const content = crlf ? str(i, 'content').replace(/\r?\n/g, '\r\n') : str(i, 'content');
       const warning = await guardedWrite(ctx, file, shown, before, content);
-      return `${before === null ? 'Created' : 'Rewrote'} ${shown} (${str(i, 'content').split('\n').length} lines).${warning}`;
+      const numbering = before === null ? await numberingWarning(file) : '';
+      return `${before === null ? 'Created' : 'Rewrote'} ${shown} (${str(i, 'content').split('\n').length} lines).${warning}${numbering}`;
     },
   },
   {

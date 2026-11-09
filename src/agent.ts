@@ -5,6 +5,7 @@ import { allTools, cleanPath, describeInput, permit, suggestPath, type Tool, typ
 import type { Provider, ToolCall, ToolResult } from './types.js';
 import type { AgentUI } from './agent-ui.js';
 import { validateInput } from './validate.js';
+import { isReadOnlyCommand } from './shell.js';
 
 const researchOnly = (t: Tool): boolean => t.readOnly && !['delegate', 'update_plan', 'remember'].includes(t.name);
 
@@ -24,6 +25,11 @@ const EXPLORE_BUDGET = 15;
 const EXPLORE_REMINDER_EVERY = 10;
 const REREAD_WARNING_AT = 3;
 const MAX_SCOPE_CHECKS = 2;
+const EDIT_LOOP_AT = 5;
+const EDIT_LOOP_EVERY = 3;
+const VERIFY_NUDGE =
+  '[verification] You changed code but have not run anything since your last edit. Before your final answer, run the tests, build or type-check that cover the change (or execute the changed code with run_code) and read the whole output; fix what fails. If nothing in this project can be run, say so explicitly in the final answer.';
+const isDocFile = (f: string): boolean => /\.(md|mdx|txt|rst)$/i.test(f);
 
 export class Agent {
   private readonly provider: Provider;
@@ -36,6 +42,8 @@ export class Agent {
   private mutations = 0;
   private readonly touched = new Set<string>();
   private readonly instructionsSeen = new Set<string>();
+  private verifiedSinceEdit = true;
+  private readonly editsPerFile = new Map<string, number>();
 
   constructor(
     private readonly session: Session,
@@ -67,6 +75,8 @@ export class Agent {
     this.changed = false;
     this.callCounts.clear();
     this.reads.clear();
+    this.verifiedSinceEdit = true;
+    this.editsPerFile.clear();
     if (this.role === 'main') void this.session.codeIndex.update(this.session.signal).catch(() => undefined);
     this.provider.addUser(await this.withRecall(task));
     this.session.log({ agent: this.role, event: 'task', task });
@@ -74,6 +84,7 @@ export class Agent {
     let failures = 0;
     let idle = 0;
     let scopeChecks = 0;
+    let verifyNudges = 0;
     let approvedDiff: string | null = null;
     let lastScopeReport: string | null = null;
     const dirtyAtStart = new Set(this.role === 'main' ? await changedFiles(cfg.root) : []);
@@ -96,6 +107,13 @@ export class Agent {
         if (r.toolCalls.length === 0) {
           if (r.stop === 'max_tokens') {
             this.provider.addUser('Your reply was cut off by the output limit. Continue exactly where you stopped.');
+            continue;
+          }
+          if (this.role === 'main' && !this.verifiedSinceEdit && verifyNudges < 1 && [...this.touched].some((f) => !isDocFile(f))) {
+            verifyNudges++;
+            this.ui.info('verificação: pedindo para rodar testes ou build antes de concluir');
+            this.session.log({ agent: this.role, event: 'verify-nudge' });
+            this.provider.addUser(VERIFY_NUDGE);
             continue;
           }
           const diff = this.role === 'main' && this.changed ? await workspaceDiff(cfg.root) : null;
@@ -200,6 +218,19 @@ export class Agent {
       const denied = await permit(tool, c.input, ctx);
       if (denied) return finish(denied, true);
       let output = await tool.run(c.input, ctx);
+      if (c.name === 'edit_file' || c.name === 'write_file') {
+        this.verifiedSinceEdit = false;
+        if (typeof c.input.path === 'string') {
+          const file = cleanPath(c.input.path);
+          const edits = (this.editsPerFile.get(file) ?? 0) + 1;
+          this.editsPerFile.set(file, edits);
+          if (edits >= EDIT_LOOP_AT && (edits - EDIT_LOOP_AT) % EDIT_LOOP_EVERY === 0) {
+            output += `\n\n[loop] You have edited ${file} ${edits} times in this task. If you keep adjusting the same thing, stop: re-read the latest error output in full, state which assumption may be wrong, and change approach instead of trying another small variation.`;
+          }
+        }
+      } else if (c.name === 'run_code' || (c.name === 'bash' && !isReadOnlyCommand(String(c.input.command ?? '')))) {
+        this.verifiedSinceEdit = true;
+      }
       if (!tool.readOnly) {
         this.changed = true;
         this.mutations++;

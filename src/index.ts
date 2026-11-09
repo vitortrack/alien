@@ -24,7 +24,8 @@ Opções:
   -C, --cwd <dir>                    pasta de trabalho (padrão: a atual)
       --orchestrate                  pipeline planner → workers → revisor
       --attempts <n>                 melhor de N: tentativas isoladas, escolhe a que passa nos testes com o menor diff
-      --no-review                    desliga a revisão automática por um agente crítico
+      --review                       liga a revisão por um agente crítico (padrão: desligada; a checagem de
+                                     escopo e o portão de verificação continuam sempre ativos)
       --max-steps <n>                passos por agente (padrão: 80)
       --budget <tokens>              para quando o total de tokens passar disso (padrão: sem limite)
       --effort <low|medium|high|xhigh|max>  esforço de raciocínio do Claude (padrão: high)
@@ -96,6 +97,7 @@ function parseConfig(): { cfg: Config; task: string; orchestrateTask: boolean; s
         cwd: { type: 'string', short: 'C' },
         orchestrate: { type: 'boolean' },
         attempts: { type: 'string' },
+        review: { type: 'boolean' },
         'no-review': { type: 'boolean' },
         'max-steps': { type: 'string' },
         budget: { type: 'string' },
@@ -130,7 +132,7 @@ function parseConfig(): { cfg: Config; task: string; orchestrateTask: boolean; s
       mode: oneOf(values.mode, ['ask', 'auto', 'read-only'] as const, '--mode', 'ask'),
       root,
       maxSteps: positiveInt(values['max-steps'], '--max-steps', 80),
-      review: !values['no-review'],
+      review: Boolean(values.review) && !values['no-review'],
       effort: oneOf<Effort>(values.effort, ['low', 'medium', 'high', 'xhigh', 'max'], '--effort', 'high'),
       numCtx: positiveInt(values['num-ctx'], '--num-ctx', 65536),
       embedModel: values['embed-model'] ?? process.env.TRACKAI_EMBED_MODEL ?? DEFAULT_EMBED_MODEL,

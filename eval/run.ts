@@ -39,6 +39,7 @@ const { values } = parseArgs({
     label: { type: 'string', default: 'run' },
     suite: { type: 'string', default: 'all' },
     attempts: { type: 'string', default: '1' },
+    review: { type: 'string', default: 'off' },
   },
 });
 
@@ -95,7 +96,7 @@ async function runOne(s: Scenario, run: number): Promise<RunResult> {
     mode: 'auto',
     root: dir,
     maxSteps: 40,
-    review: s.kind !== 'question',
+    review: s.kind !== 'question' && values.review === 'on',
     effort: 'high',
     numCtx: 65536,
     embedModel: process.env.TRACKAI_EMBED_MODEL ?? 'qwen3-embedding:0.6b',

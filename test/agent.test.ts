@@ -308,3 +308,40 @@ test('sessions are saved after each task, resumed with their history and forked 
   assert.match(new Session(config(root, { provider: 'anthropic' }), ui, () => new ScriptedProvider([])).resume(saved)!, /--provider ollama/);
   ui.close();
 });
+
+test('verification gate asks once to run something after unverified code edits; loop note on the 5th edit of a file', async () => {
+  const root = workspace();
+  const ui = UI.create();
+  try {
+    const unverified = new ScriptedProvider([
+      () => call('write_file', { path: 'src/a.js', content: 'export const a = 1;\n' }),
+      () => answer('pronto'),
+      ({ user }) => {
+        assert.match(user.at(-1)!, /^\[verification\] You changed code but have not run anything/);
+        return answer('não há como rodar nada aqui');
+      },
+    ]);
+    assert.equal(await new Session(config(root, { mode: 'auto' }), ui, () => unverified).run('crie a'), 'não há como rodar nada aqui');
+
+    const verified = new ScriptedProvider([
+      () => call('edit_file', { path: 'src/a.js', old_string: '1', new_string: '2' }),
+      () => call('bash', { command: 'node src/a.js' }),
+      () => answer('feito e testado'),
+    ]);
+    assert.equal(await new Session(config(root, { mode: 'auto' }), ui, () => verified).run('mude a'), 'feito e testado');
+
+    const edits = [2, 3, 4, 5, 6].map((n) => () => call('edit_file', { path: 'src/a.js', old_string: `${n}`, new_string: `${n + 1}` }));
+    const looping = new ScriptedProvider([
+      ...edits,
+      ({ results }) => {
+        assert.doesNotMatch(results.at(-2)![0]!.output, /\[loop\]/);
+        assert.match(results.at(-1)![0]!.output, /\[loop\] You have edited src\/a\.js 5 times/);
+        return call('bash', { command: 'node src/a.js' });
+      },
+      () => answer('ok'),
+    ]);
+    assert.equal(await new Session(config(root, { mode: 'auto' }), ui, () => looping).run('ajuste a'), 'ok');
+  } finally {
+    ui.close();
+  }
+});

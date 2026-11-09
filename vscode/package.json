@@ -99,8 +99,8 @@
         },
         "trackai.review": {
           "type": "boolean",
-          "default": true,
-          "description": "Revisão automática por um agente crítico quando há alterações."
+          "default": false,
+          "description": "Revisão extra por um agente crítico quando há alterações. Desligada por padrão: nas medições deu o mesmo acerto com 19–38% mais tokens; a checagem de escopo e o portão de verificação continuam sempre ativos."
         },
         "trackai.maxSteps": {
           "type": "number",

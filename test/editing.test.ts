@@ -124,3 +124,15 @@ test('run_code runs in the workspace root so relative imports work, with quotes 
   assert.match(await tool('run_code').run({ language: 'node', code: "import { who } from './a.js'; console.log(`olá ${who}`, \"it's\");" }, ctx), /olá mundo it's/);
   assert.match(await tool('run_code').run({ language: 'python', code: "import os; print(os.path.exists('a.js'), \"it's\")" }, ctx), /True it's/);
 });
+
+test('creating a numbered file whose number is taken warns with the next free number', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-num-'));
+  fs.mkdirSync(path.join(root, 'db/init'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'db/init/001_drivers.sql'), '');
+  fs.writeFileSync(path.join(root, 'db/init/002-vehicles.sql'), '');
+  const ctx = context(root);
+  const clash = await tool('write_file').run({ path: 'db/init/002_phone.sql', content: 'ALTER TABLE drivers ADD COLUMN phone text;\n' }, ctx);
+  assert.match(clash, /number 002 is already used by 002-vehicles\.sql in this directory; the next free number is 003/);
+  assert.doesNotMatch(await tool('write_file').run({ path: 'db/init/003_ok.sql', content: '' }, ctx), /Warning/);
+  assert.doesNotMatch(await tool('write_file').run({ path: 'src/a.js', content: 'export {};\n' }, ctx), /Warning/);
+});

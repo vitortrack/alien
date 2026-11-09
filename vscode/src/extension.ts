@@ -97,7 +97,7 @@ function readConfig(root: string): Config {
     mode: c.get<Mode>('mode', 'ask'),
     root,
     maxSteps: c.get<number>('maxSteps', 80),
-    review: c.get<boolean>('review', true),
+    review: c.get<boolean>('review', false),
     effort: 'high',
     numCtx: 65536,
     embedModel: c.get<string>('embedModel', DEFAULT_EMBED_MODEL),
