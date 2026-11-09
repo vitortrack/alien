@@ -1,4 +1,5 @@
 import { systemPrompt, type Role } from './prompts.js';
+import { repoMap } from './repomap.js';
 import { changedFiles, nestedInstructions, scopeReport, workspaceDiff } from './scope.js';
 import type { Session } from './session.js';
 import { allTools, cleanPath, describeInput, permit, suggestPath, type Tool, type ToolContext } from './tools.js';
@@ -36,6 +37,7 @@ export class Agent {
   private mutations = 0;
   private readonly touched = new Set<string>();
   private readonly instructionsSeen = new Set<string>();
+  private mapped = false;
 
   constructor(
     private readonly session: Session,
@@ -149,11 +151,20 @@ export class Agent {
 
   private async withRecall(task: string): Promise<string> {
     if (this.role !== 'main') return task;
-    const memories = await this.session.memory.recall(task, RECALLED, this.session.signal).catch(() => []);
-    if (!memories.length) return task;
-    this.ui.info(`${memories.length} lembrança(s) relevante(s) recuperada(s) da memória de longo prazo`);
-    const block = memories.map((m) => `- [${m.kind}] ${m.text}`).join('\n');
-    return `<recalled_memory>\nPossibly relevant notes from earlier sessions (verify before relying on them):\n${block}\n</recalled_memory>\n\n${task}`;
+    const firstTask = !this.mapped;
+    this.mapped = true;
+    const [memories, map] = await Promise.all([
+      this.session.memory.recall(task, RECALLED, this.session.signal).catch(() => []),
+      firstTask ? repoMap(this.session.cfg.root, task, this.session.signal) : '',
+    ]);
+    const parts: string[] = [];
+    if (map) parts.push(`<repo_map>\n${map}\n</repo_map>`);
+    if (memories.length) {
+      this.ui.info(`${memories.length} lembrança(s) relevante(s) recuperada(s) da memória de longo prazo`);
+      const block = memories.map((m) => `- [${m.kind}] ${m.text}`).join('\n');
+      parts.push(`<recalled_memory>\nPossibly relevant notes from earlier sessions (verify before relying on them):\n${block}\n</recalled_memory>`);
+    }
+    return [...parts, task].join('\n\n');
   }
 
   private async execute(calls: ToolCall[], ctx: ToolContext): Promise<ToolResult[]> {

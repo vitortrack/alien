@@ -162,3 +162,27 @@ test('concurrent index updates share one build (background warm-up + first searc
   assert.equal((await first).files, 1);
   assert.notEqual(index.update(signal), first);
 });
+
+test('python repo map ranks request files and shows who imports what', async () => {
+  const { repoMap } = await import('../src/repomap.js');
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-map-'));
+  const write = (f: string, c: string) => {
+    fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true });
+    fs.writeFileSync(path.join(root, f), c);
+  };
+  write('src/menu.js', "export const menu = [{ group: 'Rotas e operação' }];\n");
+  write('src/routes.js', "import { menu } from './menu.js';\nexport function render() { return menu; }\n");
+  write('backend/screens.js', 'export const SCREENS = [];\n');
+  write('app/models.py', 'class Driver:\n    pass\n');
+  write('app/views.py', 'from .models import Driver\n\ndef list_drivers():\n    return [Driver()]\n');
+  write('db/001.sql', 'CREATE TABLE drivers (id int);\n');
+  const map = await repoMap(root, 'Adicione um item no menu Rotas e operação');
+  const lines = map.split('\n');
+  assert.equal(lines[1], 'src/menu.js  exports: menu  ← 1: src/routes.js');
+  assert.ok(lines.includes('backend/screens.js  exports: SCREENS  ← none') || /Not listed: .*backend/.test(map));
+  assert.ok(lines.includes('app/models.py  exports: Driver  ← 1: app/views.py'), map);
+  assert.match(map, /db\/001\.sql  exports: table drivers|Not listed: .*db/);
+});
