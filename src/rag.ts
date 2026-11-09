@@ -172,7 +172,14 @@ export class CodeIndex {
     return (this.data = { version: INDEX_VERSION, embedModel: null, files: {}, chunks: [] });
   }
 
-  async update(signal: AbortSignal): Promise<BuildStats> {
+  private building: Promise<BuildStats> | null = null;
+
+  update(signal: AbortSignal): Promise<BuildStats> {
+    this.building ??= this.build(signal).finally(() => (this.building = null));
+    return this.building;
+  }
+
+  private async build(signal: AbortSignal): Promise<BuildStats> {
     const data = await this.load();
     const current: Record<string, FileMeta> = {};
     for await (const rel of fs.glob(this.pattern, { cwd: this.root, exclude: (name: string) => IGNORED.test(name) })) {

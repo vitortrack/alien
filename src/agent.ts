@@ -59,6 +59,7 @@ export class Agent {
     this.changed = false;
     this.callCounts.clear();
     this.reads.clear();
+    if (this.role === 'main') void this.session.codeIndex.update(this.session.signal).catch(() => undefined);
     this.provider.addUser(await this.withRecall(task));
     this.session.log({ agent: this.role, event: 'task', task });
     let reviews = 0;

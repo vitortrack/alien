@@ -115,3 +115,12 @@ test('bash timeout kills the whole process group, not just the shell', async () 
   await new Promise((r) => setTimeout(r, 2500));
   assert.equal(fs.existsSync(marker), false);
 });
+
+test('run_code runs in the workspace root so relative imports work, with quotes intact', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-run-'));
+  fs.writeFileSync(path.join(root, 'package.json'), '{"type":"module"}');
+  fs.writeFileSync(path.join(root, 'a.js'), "export const who = 'mundo';\n");
+  const ctx = context(root);
+  assert.match(await tool('run_code').run({ language: 'node', code: "import { who } from './a.js'; console.log(`olá ${who}`, \"it's\");" }, ctx), /olá mundo it's/);
+  assert.match(await tool('run_code').run({ language: 'python', code: "import os; print(os.path.exists('a.js'), \"it's\")" }, ctx), /True it's/);
+});

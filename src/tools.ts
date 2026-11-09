@@ -1,7 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
 import { promisify } from 'node:util';
 import { applyEdit, snippet } from './editing.js';
 import type { MemoryStore } from './memory.js';
@@ -510,7 +509,7 @@ export const allTools: Tool[] = [
     name: 'run_code',
     readOnly: false,
     description:
-      'Execute a short Python or Node.js script in the workspace root and return its output. Use it for calculations, data analysis, parsing files or quick experiments.',
+      'Execute a short Python or Node.js (ES module) script with the workspace root as working directory, so relative paths and imports like ./src/x.js resolve against the project. Returns its output. Use it for calculations, data analysis, parsing files or quick experiments.',
     schema: {
       type: 'object',
       properties: {
@@ -520,17 +519,10 @@ export const allTools: Tool[] = [
       },
       required: ['language', 'code'],
     },
-    async run(i, ctx) {
-      const python = str(i, 'language') === 'python';
-      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'trackai-'));
-      const file = path.join(dir, python ? 'script.py' : 'script.mjs');
-      await fs.writeFile(file, str(i, 'code'));
-      try {
-        const seconds = Math.min(600, Math.max(1, num(i, 'timeout_seconds', 60)));
-        return await runBash(`${python ? 'python3' : 'node'} ${JSON.stringify(file)}`, ctx, seconds * 1000);
-      } finally {
-        await fs.rm(dir, { recursive: true, force: true });
-      }
+    run(i, ctx) {
+      const quoted = `'${str(i, 'code').replace(/'/g, `'\\''`)}'`;
+      const seconds = Math.min(600, Math.max(1, num(i, 'timeout_seconds', 60)));
+      return runBash(`${str(i, 'language') === 'python' ? 'python3 -c' : 'node --input-type=module -e'} ${quoted}`, ctx, seconds * 1000);
     },
   },
   {
