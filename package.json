@@ -1,0 +1,39 @@
+{
+  "name": "trackai",
+  "version": "0.1.0",
+  "description": "Agente de código autônomo (ReAct) com planejamento, ferramentas, reflexão e orquestração multiagente — roda local com Ollama ou com Claude.",
+  "type": "module",
+  "bin": {
+    "trackai": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.dev.json",
+    "test": "node --import tsx --test test/*.test.ts",
+    "prepare": "npm run build",
+    "eval": "tsx eval/run.ts",
+    "eval:sanity": "tsx eval/sanity.ts",
+    "eval:retrieval": "tsx eval/retrieval.ts"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vitortrack/track-ai.git"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
+    "esbuild": "^0.28.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

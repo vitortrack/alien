@@ -1,0 +1,36 @@
+export const THINKING_WORDS = [
+  'Matutando',
+  'Ruminando',
+  'Cogitando',
+  'Maquinando',
+  'Destrinchando',
+  'Garimpando',
+  'Fuçando',
+  'Esmiuçando',
+  'Tramando',
+  'Arquitetando',
+  'Desembaraçando',
+  'Decifrando',
+  'Farejando',
+  'Conjecturando',
+  'Elucubrando',
+  'Ligando os pontos',
+  'Rabiscando hipóteses',
+  'Calibrando o disco voador',
+  'Consultando a nave-mãe',
+  'Abduzindo ideias',
+  'Escaneando a galáxia de arquivos',
+  'Traduzindo do marciano',
+  'Sintonizando as antenas',
+  'Orbitando o problema',
+  'Teletransportando bytes',
+  'Decodificando sinais',
+  'Alinhando os planetas',
+  'Ajustando o raio trator',
+  'Fazendo contato',
+  'Preparando o pouso',
+];
+
+export function randomThinkingWord(): string {
+  return THINKING_WORDS[Math.floor(Math.random() * THINKING_WORDS.length)]!;
+}

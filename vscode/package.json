@@ -1,0 +1,136 @@
+{
+  "name": "trackai",
+  "displayName": "TrackAI",
+  "description": "Agente de código autônomo em formato de chat: ReAct, planejamento, revisão independente, multiagente, RAG e memória — local com Ollama ou com Claude.",
+  "version": "0.1.0",
+  "publisher": "trackai-local",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vitortrack/track-ai.git",
+    "directory": "vscode"
+  },
+  "icon": "media/icon.png",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Programming Languages"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "trackai",
+          "title": "TrackAI",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "trackai": [
+        {
+          "type": "webview",
+          "id": "trackai.chat",
+          "name": "Chat"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "trackai.newChat",
+        "title": "TrackAI: Nova conversa",
+        "icon": "$(add)"
+      },
+      {
+        "command": "trackai.focus",
+        "title": "TrackAI: Abrir chat"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "trackai.newChat",
+          "when": "view == trackai.chat",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "TrackAI",
+      "properties": {
+        "trackai.provider": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "ollama",
+            "anthropic"
+          ],
+          "default": "auto",
+          "description": "Provedor do modelo. auto = Claude se houver ANTHROPIC_API_KEY, senão Ollama."
+        },
+        "trackai.model": {
+          "type": "string",
+          "default": "",
+          "description": "Modelo de chat. Vazio = glm-5.3-flash:cloud (Ollama) ou claude-opus-5-5 (Claude)."
+        },
+        "trackai.mode": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "auto",
+            "read-only"
+          ],
+          "default": "ask",
+          "enumDescriptions": [
+            "Pede confirmação para escrever arquivos e rodar comandos",
+            "Executa sozinho; só confirma comandos destrutivos",
+            "Só lê e pesquisa; nunca altera nada"
+          ],
+          "description": "Permissões do agente."
+        },
+        "trackai.lang": {
+          "type": "string",
+          "default": "pt-BR",
+          "description": "Idioma das respostas: pt-BR, en, es, fr, de, it ou auto (o da pergunta)."
+        },
+        "trackai.review": {
+          "type": "boolean",
+          "default": true,
+          "description": "Revisão automática por um agente crítico quando há alterações."
+        },
+        "trackai.maxSteps": {
+          "type": "number",
+          "default": 80,
+          "description": "Limite de passos por agente."
+        },
+        "trackai.embedModel": {
+          "type": "string",
+          "default": "qwen3-embedding:0.6b",
+          "description": "Modelo de embedding do Ollama para RAG e memória."
+        },
+        "trackai.ollamaHost": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "Endereço do Ollama."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "node build.mjs",
+    "build": "node build.mjs",
+    "check": "tsc -p tsconfig.json",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "esbuild": "0.28.2"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.0.0"
+  }
+}

@@ -1,0 +1,348 @@
+(function () {
+  const vscode = acquireVsCodeApi();
+  const $ = (id) => document.getElementById(id);
+  const messages = $('messages');
+  const input = $('input');
+  const form = $('composer');
+  const stopBtn = $('stop');
+  const sendBtn = $('send');
+  const planEl = $('plan');
+  const statusEl = $('status');
+  const orchestrate = $('orchestrate');
+  const best3 = $('best3');
+  const working = $('working');
+
+
+  const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ESC[c]);
+
+  const REF = /(^|[\s(\[>,;:])((?:[\w@.-]+\/)*[\w@.-]+\.[A-Za-z][\w]{0,5}):(\d+)(?:-(\d+))?/g;
+  const linkRefs = (html) =>
+    html.replace(REF, (_, pre, file, line, end) => `${pre}<a class="ref" href="#" data-file="${file}" data-line="${line}">${file}:${line}${end ? `-${end}` : ''}</a>`);
+
+  function inline(raw) {
+    return esc(raw)
+      .split(/(`[^`]+`)/g)
+      .map((part) => {
+        if (part.startsWith('`') && part.endsWith('`') && part.length > 1) return `<code>${linkRefs(part.slice(1, -1))}</code>`;
+        return linkRefs(
+          part
+            .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+            .replace(/(^|[\s(])\*([^*\s][^*]*)\*(?=[\s).,;:!?]|$)/g, '$1<em>$2</em>')
+            .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2">$1</a>'),
+        );
+      })
+      .join('');
+  }
+
+  const isTableRow = (l) => /^\s*\|.*\|\s*$/.test(l);
+  const cells = (l) => l.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+
+  function markdown(src) {
+    const lines = src.replace(/\r\n/g, '\n').split('\n');
+    let html = '';
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      const fence = line.match(/^\s*```(\S*)/);
+      if (fence) {
+        const buf = [];
+        i++;
+        while (i < lines.length && !/^\s*```/.test(lines[i])) buf.push(lines[i++]);
+        i++;
+        html += `<pre>${fence[1] ? `<span class="lang">${esc(fence[1])}</span>` : ''}<code>${esc(buf.join('\n'))}</code></pre>`;
+        continue;
+      }
+      if (isTableRow(line) && i + 1 < lines.length && /^\s*\|?\s*:?-{2,}/.test(lines[i + 1])) {
+        const head = cells(line);
+        i += 2;
+        const rows = [];
+        while (i < lines.length && isTableRow(lines[i])) rows.push(cells(lines[i++]));
+        html += `<table><thead><tr>${head.map((c) => `<th>${inline(c)}</th>`).join('')}</tr></thead><tbody>${rows
+          .map((r) => `<tr>${r.map((c) => `<td>${inline(c)}</td>`).join('')}</tr>`)
+          .join('')}</tbody></table>`;
+        continue;
+      }
+      const heading = line.match(/^(#{1,6})\s+(.*)/);
+      if (heading) {
+        const level = Math.min(heading[1].length + 2, 6);
+        html += `<h${level}>${inline(heading[2])}</h${level}>`;
+        i++;
+        continue;
+      }
+      const listKind = /^\s*[-*+]\s+/.test(line) ? 'ul' : /^\s*\d+[.)]\s+/.test(line) ? 'ol' : null;
+      if (listKind) {
+        const items = [];
+        const marker = listKind === 'ul' ? /^\s*[-*+]\s+/ : /^\s*\d+[.)]\s+/;
+        while (i < lines.length && marker.test(lines[i])) {
+          let item = lines[i++].replace(marker, '');
+          while (i < lines.length && /^\s{2,}\S/.test(lines[i]) && !marker.test(lines[i])) item += ' ' + lines[i++].trim();
+          items.push(`<li>${inline(item)}</li>`);
+        }
+        html += `<${listKind}>${items.join('')}</${listKind}>`;
+        continue;
+      }
+      if (/^\s*>/.test(line)) {
+        const buf = [];
+        while (i < lines.length && /^\s*>/.test(lines[i])) buf.push(lines[i++].replace(/^\s*>\s?/, ''));
+        html += `<blockquote>${inline(buf.join(' '))}</blockquote>`;
+        continue;
+      }
+      if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
+        html += '<hr>';
+        i++;
+        continue;
+      }
+      if (!line.trim()) {
+        i++;
+        continue;
+      }
+      const para = [];
+      while (i < lines.length && lines[i].trim() && !/^\s*(```|#{1,6}\s|[-*+]\s|\d+[.)]\s|>)/.test(lines[i]) && !isTableRow(lines[i])) para.push(lines[i++]);
+      if (!para.length) para.push(lines[i++]);
+      html += `<p>${para.map(inline).join('<br>')}</p>`;
+    }
+    return html;
+  }
+
+  const ALIEN =
+    '<svg class="alien" viewBox="0 0 16 16" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" fill="currentColor" d="M8 16L3.54223 12.3383C1.93278 11.0162 1 9.04287 1 6.96005C1 3.11612 4.15607 0 8 0C11.8439 0 15 3.11612 15 6.96005C15 9.04287 14.0672 11.0162 12.4578 12.3383L8 16ZM3 6H5C6.10457 6 7 6.89543 7 8V9L3 7.5V6ZM11 6C9.89543 6 9 6.89543 9 8V9L13 7.5V6H11Z"/></svg>';
+  let words = ['Pensando'];
+  let work = null;
+
+  const pick = () => words[Math.floor(Math.random() * words.length)];
+  const seconds = (w) => Math.max(1, Math.round((Date.now() - w.started) / 1000));
+
+  function scroll() {
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  function add(className, html, parent = messages) {
+    const el = document.createElement('div');
+    el.className = className;
+    el.innerHTML = html;
+    parent.appendChild(el);
+    scroll();
+    return el;
+  }
+
+  function startWork() {
+    if (work) return work;
+    const el = document.createElement('details');
+    el.className = 'work active';
+    el.open = true;
+    el.innerHTML = `<summary>${ALIEN}<span class="verb">Trabalhando…</span><span class="meta"></span></summary><div class="work-body"></div>`;
+    messages.appendChild(el);
+    working.innerHTML = `${ALIEN}<span class="verb"></span><span class="meta"></span><span class="hint">Parar para interromper</span>`;
+    working.hidden = false;
+    work = {
+      el,
+      body: el.querySelector('.work-body'),
+      verb: working.querySelector('.verb'),
+      meta: working.querySelector('.meta'),
+      summaryMeta: el.querySelector('.meta'),
+      started: Date.now(),
+      tools: 0,
+      tick: 0,
+      thoughtEl: null,
+      thoughtText: '',
+    };
+    const w = work;
+    const paint = () => {
+      if (w.tick % 4 === 0) w.verb.textContent = `${pick()}…`;
+      const meta = `${seconds(w)}s${w.tools ? ` · ${w.tools} ${w.tools === 1 ? 'ferramenta' : 'ferramentas'}` : ''}`;
+      w.meta.textContent = meta;
+      w.summaryMeta.textContent = meta;
+      w.tick++;
+    };
+    paint();
+    w.timer = setInterval(paint, 1000);
+    scroll();
+    return w;
+  }
+
+  function finishWork(state) {
+    const w = work;
+    if (!w) return;
+    work = null;
+    clearInterval(w.timer);
+    working.hidden = true;
+    working.innerHTML = '';
+    w.el.classList.remove('active');
+    if (!w.body.children.length) {
+      w.el.remove();
+      return;
+    }
+    const tools = w.tools ? ` · ${w.tools} ${w.tools === 1 ? 'ferramenta' : 'ferramentas'}` : '';
+    w.el.querySelector('.verb').textContent = state === 'done' ? `Pensou por ${seconds(w)}s` : `Interrompido após ${seconds(w)}s`;
+    w.summaryMeta.textContent = tools.replace(/^ · /, '');
+    w.el.open = false;
+  }
+
+  function endThought() {
+    if (work) {
+      work.thoughtEl = null;
+      work.thoughtText = '';
+    }
+  }
+
+  const target = () => (work ? work.body : messages);
+  const agentTag = (agent) => (agent ? `<span class="agent">${esc(agent)}</span>` : '');
+
+  function renderPlan(items) {
+    if (!items.length) {
+      planEl.hidden = true;
+      return;
+    }
+    const icon = { pending: '○', in_progress: '◐', done: '●' };
+    planEl.hidden = false;
+    planEl.innerHTML = `<div class="plan-title">Plano</div>${items
+      .map((it) => `<div class="plan-item ${it.status}">${icon[it.status] ?? '○'} ${inline(it.step)}</div>`)
+      .join('')}`;
+  }
+
+  function showAnswer(text) {
+    const w = work;
+    if (w && w.thoughtEl && w.thoughtText.trim() === String(text).trim()) w.thoughtEl.remove();
+    finishWork('done');
+    add('msg assistant', markdown(text));
+  }
+
+  function setBusy(busy) {
+    stopBtn.hidden = !busy;
+    sendBtn.disabled = busy;
+    if (busy) startWork();
+    else finishWork('stopped');
+  }
+
+  window.addEventListener('message', (event) => {
+    const m = event.data;
+    switch (m.type) {
+      case 'words':
+        if (Array.isArray(m.words) && m.words.length) words = m.words;
+        break;
+      case 'text': {
+        const w = startWork();
+        if (!w.thoughtEl) w.thoughtEl = add('thought', '', w.body);
+        w.thoughtText += m.delta;
+        w.thoughtEl.innerHTML = markdown(w.thoughtText);
+        scroll();
+        break;
+      }
+      case 'thinking':
+        startWork();
+        break;
+      case 'tool': {
+        const w = startWork();
+        endThought();
+        w.tools++;
+        add(`tool${m.agent ? ' sub' : ''}`, `${agentTag(m.agent)}<span class="tool-name">⚙ ${esc(m.name)}</span> <span class="tool-args">${esc(m.args)}</span>`, w.body);
+        break;
+      }
+      case 'observation': {
+        const lines = String(m.output).trim().split('\n');
+        const first = esc(lines[0].slice(0, 160));
+        const more = lines.length > 1 ? ` <span class="muted">(+${lines.length - 1} linhas)</span>` : '';
+        const details = document.createElement('details');
+        details.className = `obs ${m.ok ? 'ok' : 'fail'}${m.agent ? ' sub' : ''}`;
+        details.innerHTML = `<summary>${m.ok ? '✓' : '✗'} ${first}${more}</summary><pre><code>${linkRefs(esc(m.output))}</code></pre>`;
+        target().appendChild(details);
+        scroll();
+        break;
+      }
+      case 'plan':
+        renderPlan(m.items);
+        break;
+      case 'phase':
+        endThought();
+        add('phase', esc(m.title), target());
+        break;
+      case 'info':
+      case 'warn':
+        endThought();
+        add(`notice ${m.type}${m.agent ? ' sub' : ''}`, `${agentTag(m.agent)}${inline(m.message)}`, target());
+        break;
+      case 'error':
+        finishWork('stopped');
+        add('notice error', inline(m.message));
+        break;
+      case 'answer':
+      case 'final':
+        showAnswer(m.text);
+        break;
+      case 'confirm': {
+        const w = startWork();
+        w.el.open = true;
+        endThought();
+        const always = m.alwaysLabel ? `<button class="always secondary">Sempre: ${esc(m.alwaysLabel)}</button>` : '';
+        const box = add(
+          'confirm',
+          `${agentTag(m.agent)}<div class="question">${inline(m.question)}</div><div class="buttons"><button class="allow">Permitir</button>${always}<button class="deny secondary">Negar</button></div>`,
+          w.body,
+        );
+        box.dataset.id = m.id;
+        const LABEL = { yes: 'permitido', always: `permitido sempre nesta conversa (${esc(m.alwaysLabel ?? '')})`, no: 'negado' };
+        const answer = (decision) => {
+          vscode.postMessage({ type: 'confirmResult', id: m.id, decision });
+          box.querySelector('.buttons').innerHTML = `<span class="muted">${LABEL[decision]}</span>`;
+        };
+        box.querySelector('.allow').addEventListener('click', () => answer('yes'));
+        box.querySelector('.always')?.addEventListener('click', () => answer('always'));
+        box.querySelector('.deny').addEventListener('click', () => answer('no'));
+        break;
+      }
+      case 'confirmClosed': {
+        const box = messages.querySelector(`.confirm[data-id="${m.id}"] .buttons`);
+        if (box) box.innerHTML = '<span class="muted">cancelado</span>';
+        break;
+      }
+      case 'busy':
+        setBusy(m.value);
+        break;
+      case 'usage': {
+        const cost = m.cost === null ? 'custo desconhecido' : m.cost === 0 ? 'US$ 0 (local)' : `~US$ ${m.cost.toFixed(4)}`;
+        add('usage', `tokens na conversa: ${m.input.toLocaleString('pt-BR')} entrada · ${m.output.toLocaleString('pt-BR')} saída · ${cost}`);
+        break;
+      }
+      case 'status':
+        statusEl.textContent = m.text;
+        break;
+      case 'cleared':
+        finishWork('stopped');
+        messages.innerHTML = '';
+        renderPlan([]);
+        add('notice info', 'Nova conversa.');
+        break;
+    }
+  });
+
+  function send() {
+    const text = input.value.trim();
+    if (!text || sendBtn.disabled) return;
+    messages.querySelector('.welcome')?.remove();
+    add('msg user', esc(text).replace(/\n/g, '<br>'));
+    vscode.postMessage({ type: 'send', text, orchestrate: orchestrate.checked, best3: best3.checked });
+    input.value = '';
+  }
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    send();
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      send();
+    }
+  });
+  stopBtn.addEventListener('click', () => vscode.postMessage({ type: 'stop' }));
+  messages.addEventListener('click', (e) => {
+    const ref = e.target.closest('a.ref');
+    if (!ref) return;
+    e.preventDefault();
+    vscode.postMessage({ type: 'open', file: ref.dataset.file, line: Number(ref.dataset.line) });
+  });
+
+  vscode.postMessage({ type: 'ready' });
+  input.focus();
+})();

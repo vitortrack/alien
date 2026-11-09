@@ -1,0 +1,220 @@
+import { systemPrompt, type Role } from './prompts.js';
+import { changedFiles, nestedInstructions, scopeReport, workspaceDiff } from './scope.js';
+import type { Session } from './session.js';
+import { allTools, cleanPath, describeInput, permit, suggestPath, type Tool, type ToolContext } from './tools.js';
+import type { Provider, ToolCall, ToolResult } from './types.js';
+import type { AgentUI } from './agent-ui.js';
+import { validateInput } from './validate.js';
+
+const researchOnly = (t: Tool): boolean => t.readOnly && !['delegate', 'update_plan', 'remember'].includes(t.name);
+
+const ROLE_TOOLS: Record<Role, (t: Tool) => boolean> = {
+  main: () => true,
+  worker: (t) => t.name !== 'delegate',
+  explorer: researchOnly,
+  planner: researchOnly,
+  critic: (t) => researchOnly(t) || t.name === 'bash',
+};
+
+const MAX_REVIEWS = 2;
+const FAILURE_STREAK = 3;
+const MAX_IDENTICAL_CALLS = 3;
+const RECALLED = 5;
+const EXPLORE_BUDGET = 15;
+const EXPLORE_REMINDER_EVERY = 10;
+const REREAD_WARNING_AT = 3;
+const MAX_SCOPE_CHECKS = 2;
+
+export class Agent {
+  private readonly provider: Provider;
+  private readonly tools: Tool[];
+  private systemCache: { key: string; text: string } | null = null;
+  private changed = false;
+  private readonly callCounts = new Map<string, number>();
+  private readonly files = new Map<string, number>();
+  private readonly reads = new Map<string, number>();
+  private mutations = 0;
+  private readonly touched = new Set<string>();
+  private readonly instructionsSeen = new Set<string>();
+
+  constructor(
+    private readonly session: Session,
+    readonly role: Role,
+    private readonly ui: AgentUI,
+  ) {
+    this.provider = session.newProvider();
+    this.tools = allTools.filter(ROLE_TOOLS[role]);
+  }
+
+  private get system(): string {
+    const { root, lang, interactive = false } = this.session.cfg;
+    const key = `${lang}|${interactive}`;
+    if (this.systemCache?.key !== key) this.systemCache = { key, text: systemPrompt(this.role, root, lang, interactive) };
+    return this.systemCache.text;
+  }
+
+  async run(task: string): Promise<string> {
+    const { cfg } = this.session;
+    const ctx = this.session.context(this.ui, this.files);
+    this.changed = false;
+    this.callCounts.clear();
+    this.reads.clear();
+    this.provider.addUser(await this.withRecall(task));
+    this.session.log({ agent: this.role, event: 'task', task });
+    let reviews = 0;
+    let failures = 0;
+    let idle = 0;
+    let scopeChecks = 0;
+    let approvedDiff: string | null = null;
+    let lastScopeReport: string | null = null;
+    const dirtyAtStart = new Set(this.role === 'main' ? await changedFiles(cfg.root) : []);
+    this.touched.clear();
+
+    try {
+      for (let step = 1; step <= cfg.maxSteps; step++) {
+        if (this.session.overBudget()) return `Orçamento de ${cfg.tokenBudget.toLocaleString('pt-BR')} tokens atingido; parei para não gastar além do limite.`;
+        const r = await this.provider.step({
+          system: this.system,
+          tools: this.tools,
+          signal: this.session.signal,
+          onText: this.ui.text,
+          onThinking: this.ui.thinking,
+        });
+        this.session.addUsage(r.usage);
+        this.session.log({ agent: this.role, event: 'step', step, stop: r.stop, text: r.text, toolCalls: r.toolCalls });
+        if (r.stop === 'refusal') return 'O modelo recusou esta solicitação.';
+
+        if (r.toolCalls.length === 0) {
+          if (r.stop === 'max_tokens') {
+            this.provider.addUser('Your reply was cut off by the output limit. Continue exactly where you stopped.');
+            continue;
+          }
+          const diff = this.role === 'main' && this.changed ? await workspaceDiff(cfg.root) : null;
+          const unchangedSinceApproval = diff !== null && diff === approvedDiff;
+          if (this.role === 'main' && cfg.review && this.changed && reviews < MAX_REVIEWS && !unchangedSinceApproval) {
+            reviews++;
+            const verdict = await this.session.review(task, this.ui);
+            if (!verdict.approved) {
+              this.ui.warn('o revisor pediu correções');
+              this.provider.addUser(
+                `An independent reviewer inspected the workspace and requested changes:\n\n${verdict.feedback}\n\nFix every valid point (explain briefly if you disagree with one), verify again, then give the final report.`,
+              );
+              continue;
+            }
+            approvedDiff = diff;
+            this.ui.info('revisor aprovou o trabalho');
+          }
+          if (this.role === 'main' && this.changed && scopeChecks < MAX_SCOPE_CHECKS) {
+            scopeChecks++;
+            const now = (await changedFiles(cfg.root)).filter((f) => !dirtyAtStart.has(f) || this.touched.has(f));
+            const report = scopeReport(task, now);
+            if (report && report !== lastScopeReport) {
+              lastScopeReport = report;
+              this.ui.warn('checagem de escopo: alterações em áreas que o pedido não menciona');
+              this.session.log({ agent: this.role, event: 'scope-check', report });
+              this.provider.addUser(report);
+              continue;
+            }
+          }
+          this.session.log({ agent: this.role, event: 'final', text: r.text });
+          if (this.role === 'main' && this.changed) {
+            await this.session.memory.add('episode', `Task: ${task.slice(0, 300)} | Outcome: ${r.text.slice(0, 700)}`, ctx.signal);
+          }
+          return r.text;
+        }
+
+        const before = this.mutations;
+        const results = await this.execute(r.toolCalls, ctx);
+        failures = results.every((x) => x.isError) ? failures + 1 : 0;
+        idle = this.mutations > before ? 0 : idle + 1;
+        const last = results[results.length - 1]!;
+        if ((this.role === 'main' || this.role === 'worker') && idle >= EXPLORE_BUDGET && (idle - EXPLORE_BUDGET) % EXPLORE_REMINDER_EVERY === 0) {
+          last.output += `\n\n[focus] You have spent ${idle} steps investigating without changing anything. If the user asked a question, answer now with what you already know. If they asked for a change, stop exploring: state your decision in one line and make the first edit now. Do not re-read files whose content you have already seen.`;
+        }
+        if (failures >= FAILURE_STREAK) {
+          last.output +=
+            '\n\n[reflection] Several tool calls in a row have failed. Stop and reconsider: re-read the relevant code and the exact error, question your assumptions, and try a different approach.';
+        }
+        if (step === cfg.maxSteps - 2) last.output += '\n\n[budget] Only 2 steps left. Wrap up now and give your final report.';
+        this.provider.addToolResults(results);
+        if (this.session.signal.aborted) return 'Interrompido pelo usuário.';
+      }
+      return `Limite de ${cfg.maxSteps} passos atingido antes de concluir. Peça para continuar ou aumente --max-steps.`;
+    } catch (e) {
+      if (this.session.signal.aborted) return 'Interrompido pelo usuário.';
+      throw e;
+    }
+  }
+
+  private async withRecall(task: string): Promise<string> {
+    if (this.role !== 'main') return task;
+    const memories = await this.session.memory.recall(task, RECALLED, this.session.signal).catch(() => []);
+    if (!memories.length) return task;
+    this.ui.info(`${memories.length} lembrança(s) relevante(s) recuperada(s) da memória de longo prazo`);
+    const block = memories.map((m) => `- [${m.kind}] ${m.text}`).join('\n');
+    return `<recalled_memory>\nPossibly relevant notes from earlier sessions (verify before relying on them):\n${block}\n</recalled_memory>\n\n${task}`;
+  }
+
+  private async execute(calls: ToolCall[], ctx: ToolContext): Promise<ToolResult[]> {
+    const parallel =
+      calls.length > 1 &&
+      calls.every((c) => this.tools.find((t) => t.name === c.name)?.readOnly && !(c.name === 'delegate' && c.input.role === 'worker'));
+    if (parallel) return Promise.all(calls.map((c) => this.call(c, ctx)));
+    const results: ToolResult[] = [];
+    for (const c of calls) results.push(await this.call(c, ctx));
+    return results;
+  }
+
+  private async call(c: ToolCall, ctx: ToolContext): Promise<ToolResult> {
+    const finish = (output: string, isError: boolean): ToolResult => {
+      this.ui.observation(!isError, output);
+      this.session.log({ agent: this.role, event: 'tool', name: c.name, input: c.input, isError, output: output.slice(0, 4000) });
+      return { id: c.id, name: c.name, output, isError };
+    };
+    const tool = this.tools.find((t) => t.name === c.name);
+    this.ui.tool(c.name, describeInput(c.input));
+    if (!tool) return finish(`Unknown tool "${c.name}". Available tools: ${this.tools.map((t) => t.name).join(', ')}.`, true);
+    const { error: invalid, ignored } = validateInput(tool, c.input);
+    if (invalid) return finish(`Invalid arguments: ${invalid}. Fix the arguments and call the tool again.`, true);
+    const note = ignored.length ? `\n[ignored unknown argument(s): ${ignored.join(', ')}; this tool accepts: ${Object.keys(tool.schema.properties).join(', ')}]` : '';
+    const signature = `${c.name}:${JSON.stringify(c.input)}`;
+    const seen = (this.callCounts.get(signature) ?? 0) + 1;
+    this.callCounts.set(signature, seen);
+    if (seen > MAX_IDENTICAL_CALLS && !tool.readOnly) {
+      return finish(`Loop guard: this exact ${c.name} call was already made ${seen - 1} times. Repeating it will not change the outcome; change your approach.`, true);
+    }
+    if (seen > MAX_IDENTICAL_CALLS) {
+      return finish(`Loop guard: you already made this exact call ${seen - 1} times and have its result above. Use what you have or try something different.`, true);
+    }
+    try {
+      if (ctx.signal.aborted) return finish('Interrupted by the user.', true);
+      const denied = await permit(tool, c.input, ctx);
+      if (denied) return finish(denied, true);
+      let output = await tool.run(c.input, ctx);
+      if (!tool.readOnly) {
+        this.changed = true;
+        this.mutations++;
+        if (typeof c.input.path === 'string') {
+          this.reads.delete(c.input.path);
+          this.touched.add(cleanPath(c.input.path));
+        }
+      }
+      if ((c.name === 'read_file' || c.name === 'edit_file' || c.name === 'write_file') && typeof c.input.path === 'string') {
+        const rules = await nestedInstructions(ctx.root, cleanPath(c.input.path), this.instructionsSeen);
+        if (rules) output += `\n\n${rules}`;
+      }
+      if (c.name === 'read_file' && typeof c.input.path === 'string') {
+        const times = (this.reads.get(c.input.path) ?? 0) + 1;
+        this.reads.set(c.input.path, times);
+        if (times >= REREAD_WARNING_AT) {
+          output += `\n\n[note] You have read ${c.input.path} ${times} times in this task and it has not changed since. Reuse what you already saw instead of reading it again.`;
+        }
+      }
+      return finish(output + note, false);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      const hint = /ENOENT/.test(message) && typeof c.input.path === 'string' ? await suggestPath(ctx.root, c.input.path) : '';
+      return finish(`Error: ${hint ? `File not found: ${String(c.input.path)}.${hint}` : message}`, true);
+    }
+  }
+}
