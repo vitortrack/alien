@@ -42,10 +42,13 @@ export interface StepResult {
   toolCalls: ToolCall[];
   stop: StopReason;
   usage: Usage;
+  compacted?: boolean;
 }
 
 export interface StepRequest {
   system: string;
+  task?: string;
+  changedFiles?: string[];
   tools: ToolSpec[];
   signal: AbortSignal;
   onText(delta: string): void;

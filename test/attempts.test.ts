@@ -45,8 +45,8 @@ test('bestOf runs isolated attempts, applies only the smallest passing one and c
   fs.writeFileSync(path.join(root, 'wip.txt'), 'uncommitted work of the user\n');
 
   const plans = [
-    [write('feature.js', 'export const f = 1;\n'), write('backend/extra.js', 'export {};\n'), verify, done('A: com extra')],
-    [write('feature.js', 'export const f = 1;\n'), verify, done('B: mínimo')],
+    [write('feature.js', 'export const f = 1;\n'), write('backend/extra.js', 'export {};\n'), verify, done('A: com extra'), done('A: com extra')],
+    [write('feature.js', 'export const f = 1;\n'), verify, done('B: mínimo'), done('B: mínimo')],
   ];
   const cfg: Config = {
     provider: 'ollama', model: 'mock', mode: 'auto', root, maxSteps: 10, review: false, effort: 'high',

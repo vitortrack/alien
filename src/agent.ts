@@ -5,6 +5,9 @@ import { allTools, cleanPath, describeInput, permit, suggestPath, type Tool, typ
 import type { Provider, ToolCall, ToolResult } from './types.js';
 import type { AgentUI } from './agent-ui.js';
 import { validateInput } from './validate.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { formatErrors, typeDiagnostics, typeErrors } from './diagnostics.js';
 import { isReadOnlyCommand } from './shell.js';
 
 const researchOnly = (t: Tool): boolean => t.readOnly && !['delegate', 'update_plan', 'remember', 'report_conflict', 'skill'].includes(t.name);
@@ -12,7 +15,7 @@ const researchOnly = (t: Tool): boolean => t.readOnly && !['delegate', 'update_p
 const BASH_COVERS = ['update_plan', 'remember', 'run_code', 'list_dir', 'glob', 'grep'];
 
 const ROLE_TOOLS: Record<Role, (t: Tool) => boolean> = {
-  main: (t) => !BASH_COVERS.includes(t.name),
+  main: () => true,
   worker: (t) => t.name !== 'delegate',
   explorer: researchOnly,
   planner: researchOnly,
@@ -27,10 +30,25 @@ const EXPLORE_BUDGET = 15;
 const EXPLORE_REMINDER_EVERY = 10;
 const REREAD_WARNING_AT = 3;
 const MAX_SCOPE_CHECKS = 2;
+const RECAP_EVERY = 30;
 const EDIT_LOOP_AT = 5;
 const EDIT_LOOP_EVERY = 3;
 const VERIFY_NUDGE =
   '[verification] You changed code but have not run anything since your last edit. Before your final answer, run the tests, build or type-check that cover the change (or execute the changed code) and read the whole output; fix what fails. If nothing in this project can be run, say so explicitly in the final answer.';
+export const verifyReserve = (maxSteps: number): number => Math.min(maxSteps - 1, Math.max(2, Math.ceil(maxSteps * 0.1)));
+export const budgetWarning = (left: number, unverified: boolean): string =>
+  unverified
+    ? `[budget] Only ${left} steps left. Stop adding new work now: run the type-check, build or tests that cover your changes, fix what fails, then give the final report and list every requested item that is not done.`
+    : `[budget] Only ${left} steps left. Wrap up now and give your final report; list every requested item that is not done.`;
+const REQUIREMENTS_NUDGE = (task: string): string =>
+  `[requirements] Before finishing, check your work against every item of the original request below, one by one, and then against the project instructions (naming, comments, file layout, required checks). For each item write PASS or FAIL with concrete evidence (file:line you changed or the command output that proves it); an item you did not implement or could not verify is FAIL. Then fix every FAIL item, verify again, and give the final report.\n\n<original_request>\n${task}\n</original_request>`;
+const readIfExists = (file: string): string | null => {
+  try {
+    return fs.readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
+};
 const isDocFile = (f: string): boolean => /\.(md|mdx|txt|rst)$/i.test(f);
 
 export class Agent {
@@ -54,7 +72,8 @@ export class Agent {
   ) {
     this.provider = session.newProvider();
     const only = session.cfg.tools;
-    this.tools = allTools.filter((t) => ROLE_TOOLS[role](t) && (!only || only.includes(t.name)) && (t.name !== 'skill' || session.skills.length > 0));
+    const lean = role === 'main' && session.cfg.provider === 'anthropic';
+    this.tools = allTools.filter((t) => ROLE_TOOLS[role](t) && !(lean && BASH_COVERS.includes(t.name)) && (!only || only.includes(t.name)) && (t.name !== 'skill' || session.skills.length > 0));
   }
 
   snapshot(): unknown {
@@ -88,6 +107,7 @@ export class Agent {
     let idle = 0;
     let scopeChecks = 0;
     let verifyNudges = 0;
+    let requirementsChecked = this.role !== 'main';
     let approvedDiff: string | null = null;
     let lastScopeReport: string | null = null;
     const dirtyAtStart = new Set(this.role === 'main' ? await changedFiles(cfg.root) : []);
@@ -98,12 +118,18 @@ export class Agent {
         if (this.session.overBudget()) return `Orçamento de ${cfg.tokenBudget.toLocaleString('pt-BR')} tokens atingido; parei para não gastar além do limite.`;
         const r = await this.provider.step({
           system: this.system,
+          task,
+          changedFiles: [...this.touched],
           tools: this.tools,
           signal: this.session.signal,
           onText: this.ui.text,
           onThinking: this.ui.thinking,
         });
         this.session.addUsage(r.usage);
+        if (r.compacted) {
+          this.ui.info('contexto compactado: histórico antigo resumido, pedido original mantido');
+          this.session.log({ agent: this.role, event: 'compacted', step });
+        }
         this.session.log({ agent: this.role, event: 'step', step, stop: r.stop, text: r.text, toolCalls: r.toolCalls });
         if (r.stop === 'refusal') return 'O modelo recusou esta solicitação.';
 
@@ -117,6 +143,13 @@ export class Agent {
             this.ui.info('verificação: pedindo para rodar testes ou build antes de concluir');
             this.session.log({ agent: this.role, event: 'verify-nudge' });
             this.provider.addUser(VERIFY_NUDGE);
+            continue;
+          }
+          if (this.changed && !requirementsChecked && [...this.touched].some((f) => !isDocFile(f))) {
+            requirementsChecked = true;
+            this.ui.info('requisitos: conferindo cada item do pedido antes de concluir');
+            this.session.log({ agent: this.role, event: 'requirements-check' });
+            this.provider.addUser(REQUIREMENTS_NUDGE(task));
             continue;
           }
           const diff = this.role === 'main' && this.changed ? await workspaceDiff(cfg.root) : null;
@@ -171,7 +204,10 @@ export class Agent {
           last.output +=
             '\n\n[reflection] Several tool calls in a row have failed. Stop and reconsider: re-read the relevant code and the exact error, question your assumptions, and try a different approach.';
         }
-        if (step === cfg.maxSteps - 2) last.output += '\n\n[budget] Only 2 steps left. Wrap up now and give your final report.';
+        if (this.role === 'main' && step % RECAP_EVERY === 0) {
+          last.output += `\n\n[recap] Step ${step} of ${cfg.maxSteps}. Re-read the original request and keep working on what is still missing; do not stop before every item is done and verified.\n<original_request>\n${task}\n</original_request>`;
+        }
+        if (step === cfg.maxSteps - verifyReserve(cfg.maxSteps)) last.output += `\n\n${budgetWarning(cfg.maxSteps - step, this.touched.size > 0 && !this.verifiedSinceEdit)}`;
         this.provider.addToolResults(results);
         if (this.session.signal.aborted) return 'Interrompido pelo usuário.';
       }
@@ -225,15 +261,37 @@ export class Agent {
     if (c.name === 'report_conflict' && c.input.kind === 'test_contradicts_request' && (this.touched.size === 0 || !this.verifiedSinceEdit)) {
       return finish('Not reported yet: first implement what the request asks (edit the code), then run the tests after your last edit, so the explanation quotes real output. Then call report_conflict again.', true);
     }
+    if (c.name === 'report_conflict' && this.touched.size === 0 && !this.session.cfg.interactive) {
+      return finish('Not reported: nobody is available to answer questions in this run. Choose the most reasonable option, note the assumption for your final report, and implement what the request asks. Report a conflict only after that work shows the request cannot be done as asked.', true);
+    }
     try {
       if (ctx.signal.aborted) return finish('Interrupted by the user.', true);
       const denied = await permit(tool, c.input, ctx);
       if (denied) return finish(denied, true);
+      const guarded = (c.name === 'edit_file' || c.name === 'write_file') && typeof c.input.path === 'string' ? cleanPath(c.input.path) : null;
+      const previous = guarded === null ? null : readIfExists(path.resolve(ctx.root, guarded));
+      const blockingBefore = new Set(guarded === null || previous === null ? [] : typeErrors(ctx.root, guarded).filter((e) => e.blocking).map((e) => e.key));
       let output = await tool.run(c.input, ctx);
+      if (guarded !== null) {
+        const introduced = typeErrors(ctx.root, guarded).filter((e) => e.blocking && !blockingBefore.has(e.key));
+        if (introduced.length) {
+          const target = path.resolve(ctx.root, guarded);
+          if (previous === null) {
+            fs.rmSync(target, { force: true });
+            ctx.files.delete(target);
+          } else {
+            fs.writeFileSync(target, previous);
+            ctx.files.set(target, fs.statSync(target).mtimeMs);
+          }
+          return finish(`Edit rejected and reverted: it introduces ${introduced.length} error(s) the type checker can see in this file alone:\n${formatErrors(introduced)}\nThe file is unchanged. Fix the edit (declare or import the missing names, close the syntax) and apply it again.`, true);
+        }
+      }
       if (c.name === 'edit_file' || c.name === 'write_file') {
         this.verifiedSinceEdit = false;
         if (typeof c.input.path === 'string') {
           const file = cleanPath(c.input.path);
+          const diagnostics = typeDiagnostics(ctx.root, file);
+          if (diagnostics) output += `\n\n${diagnostics}`;
           const edits = (this.editsPerFile.get(file) ?? 0) + 1;
           this.editsPerFile.set(file, edits);
           if (edits >= EDIT_LOOP_AT && (edits - EDIT_LOOP_AT) % EDIT_LOOP_EVERY === 0) {

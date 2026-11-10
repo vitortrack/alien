@@ -40,6 +40,10 @@ export interface Tool extends ToolSpec {
 }
 
 const MAX_OUTPUT = 20_000;
+const OUTLINE_OVER = 300;
+const WINDOW = 100;
+const GREP_SUMMARY_OVER = 30;
+const DECLARATION = /^(export\s+)?(default\s+)?(declare\s+)?(abstract\s+)?(async\s+)?(function\*?|class|interface|type|enum|const|let|def)\s+[\w$]+|^(  |\t)?@(Get|Post|Put|Patch|Delete|Controller|Injectable|Module)\b|^(  |\t)((public|private|protected|static|readonly|async)\s+)*(def\s+)?[\w$]+\s*\([^)]*\)\s*(:\s*[^{=]+)?[{:]\s*$/;
 const IGNORED_DIRS = ['node_modules', '.git', 'dist', 'build', '.next', 'coverage', '.trackai'];
 const IGNORED = new RegExp(`(^|/)(${IGNORED_DIRS.map((d) => d.replace('.', '\\.')).join('|')})(/|$)`);
 
@@ -298,13 +302,18 @@ export const allTools: Tool[] = [
       if (content.includes('\0')) throw new Error('This is a binary file and cannot be read as text.');
       ctx.files.set(file, await mtime(file));
       const lines = content.replace(/\r\n/g, '\n').split('\n');
+      const outline = i.offset === undefined && i.limit === undefined && lines.length > OUTLINE_OVER;
       const start = Math.min(Math.max(1, num(i, 'offset', 1)), Math.max(1, lines.length));
-      const slice = lines.slice(start - 1, start - 1 + num(i, 'limit', 400));
+      const slice = lines.slice(start - 1, start - 1 + (outline ? WINDOW : num(i, 'limit', 400)));
       const end = start + slice.length - 1;
       const body = slice.map((line, k) => `${String(start + k).padStart(5)}\t${line}`).join('\n');
       const crlf = content.includes('\r\n') ? '\n[file uses CRLF line endings; edit_file and write_file keep them automatically, so edit normally]' : '';
       if (start === 1 && end >= lines.length) return clip((body || '(empty file)') + crlf);
-      const header = `[${str(i, 'path')}: lines ${start}-${end} of ${lines.length}${start > 1 ? `; ${start - 1} lines above` : ''}]`;
+      const declarations = outline
+        ? lines.flatMap((line, k) => (DECLARATION.test(line) ? [`${String(k + 1).padStart(5)}\t${line.trim().slice(0, 140)}`] : [])).slice(0, 80)
+        : [];
+      const map = declarations.length ? `[outline: declarations with their line numbers; read the range you need with offset/limit]\n${declarations.join('\n')}\n` : '';
+      const header = `${map}[${str(i, 'path')}: lines ${start}-${end} of ${lines.length}${start > 1 ? `; ${start - 1} lines above` : ''}]`;
       const footer = end < lines.length ? `\n[${lines.length - end} more lines below; continue with offset=${end + 1}]` : '';
       return clip(`${header}\n${body}${footer}${crlf}`);
     },
@@ -374,8 +383,17 @@ export const allTools: Tool[] = [
       try {
         const { stdout } = await execFileP('grep', args, { cwd: ctx.root, maxBuffer: 50_000_000, signal: ctx.signal });
         const lines = stdout.split('\n').filter(Boolean);
-        const more = lines.length > 300 ? `\n... ${lines.length - 300} more matches; narrow the pattern or path` : '';
-        return clip(lines.slice(0, 300).join('\n') + more);
+        if (lines.length <= GREP_SUMMARY_OVER) return clip(lines.join('\n'));
+        const byFile = new Map<string, { count: number; first: string }>();
+        for (const line of lines) {
+          const file = line.slice(0, line.indexOf(':'));
+          const entry = byFile.get(file);
+          if (entry) entry.count++;
+          else byFile.set(file, { count: 1, first: line.slice(file.length + 1).slice(0, 160) });
+        }
+        const files = [...byFile].slice(0, 100).map(([file, e]) => `${file} (${e.count}): ${e.first}`);
+        const more = byFile.size > 100 ? `\n... ${byFile.size - 100} more files` : '';
+        return clip(`${lines.length} matches in ${byFile.size} files; per file: count and first match. Narrow with path/include, or read the range you need:\n${files.join('\n')}${more}`);
       } catch (e) {
         if ((e as { code?: unknown }).code === 1) return 'No matches.';
         throw e;

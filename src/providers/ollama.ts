@@ -20,11 +20,13 @@ type OllamaChunk = {
 };
 
 const COMPACT_AT = 0.75;
-const KEEP_FULL_OBSERVATIONS = 6;
+const KEEP_FULL_OBSERVATIONS = 10;
+const ELIDE_BLOCK = 10;
 const ELIDE_OVER = 1500;
-const ELIDE_AT = 0.5;
 const CLOUD_CTX_CAP = 262_144;
 const KEEP_RECENT = 8;
+const COMPACT_MAX_TOKENS = 150_000;
+export const compactAt = (ctx: number): number => Math.min(ctx * COMPACT_AT, COMPACT_MAX_TOKENS);
 
 function parseArgs(raw: Record<string, unknown> | string): Record<string, unknown> {
   if (typeof raw !== 'string') return raw ?? {};
@@ -93,13 +95,13 @@ export class OllamaProvider implements Provider {
 
   async step(req: StepRequest): Promise<StepResult> {
     const { thinking: think, ctx } = await this.modelInfo(req.signal);
-    if (this.lastPromptTokens > ctx * COMPACT_AT) await this.compact(req.signal, ctx);
+    const compacted = this.lastPromptTokens > compactAt(ctx) && (await this.compact(req.signal, ctx, req.task, req.changedFiles ?? []));
     const res = await this.post(
       {
         model: this.model,
         stream: true,
         ...(think ? { think: true } : {}),
-        messages: [{ role: 'system', content: req.system }, ...(this.lastPromptTokens > ctx * ELIDE_AT ? this.withElidedObservations() : this.history)],
+        messages: [{ role: 'system', content: req.system }, ...this.withElidedObservations()],
         tools: req.tools.map((t: ToolSpec) => ({
           type: 'function',
           function: { name: t.name, description: t.description, parameters: t.schema },
@@ -138,20 +140,15 @@ export class OllamaProvider implements Provider {
       input: parseArgs(c.function.arguments),
     }));
     const stop = calls.length ? 'tool_use' : doneReason === 'length' ? 'max_tokens' : 'end';
-    return { text, toolCalls: calls, stop, usage };
+    return { text, toolCalls: calls, stop, usage, ...(compacted ? { compacted } : {}) };
   }
 
   private withElidedObservations(): OllamaMessage[] {
-    let toolSeen = 0;
-    const keepFrom = new Set<number>();
-    for (let i = this.history.length - 1; i >= 0 && toolSeen < KEEP_FULL_OBSERVATIONS; i--) {
-      if (this.history[i]!.role === 'tool') {
-        keepFrom.add(i);
-        toolSeen++;
-      }
-    }
+    const tools = this.history.flatMap((m, i) => (m.role === 'tool' ? [i] : []));
+    const masked = Math.floor(Math.max(0, tools.length - KEEP_FULL_OBSERVATIONS) / ELIDE_BLOCK) * ELIDE_BLOCK;
+    const elide = new Set(tools.slice(0, masked));
     return this.history.map((m, i) =>
-      m.role !== 'tool' || keepFrom.has(i) || m.content.length <= ELIDE_OVER
+      !elide.has(i) || m.content.length <= ELIDE_OVER
         ? m
         : { ...m, content: `${m.content.slice(0, 600)}\n… [older tool output elided to save context; run the tool again if you need it]` },
     );
@@ -219,10 +216,10 @@ export class OllamaProvider implements Provider {
   }
 
 
-  private async compact(signal: AbortSignal, ctx: number): Promise<void> {
+  private async compact(signal: AbortSignal, ctx: number, task: string | undefined, changedFiles: string[]): Promise<boolean> {
     let cut = Math.max(0, this.history.length - KEEP_RECENT);
-    while (cut > 0 && this.history[cut]?.role !== 'user') cut--;
-    if (cut < 2) return;
+    while (cut > 0 && this.history[cut]?.role === 'tool') cut--;
+    if (cut < 2) return false;
     const transcript = this.history
       .slice(0, cut)
       .map((m) => {
@@ -249,10 +246,14 @@ export class OllamaProvider implements Provider {
       signal,
     );
     const summary = ((await res.json()) as { message?: { content?: string } }).message?.content ?? '';
+    const kept = this.history.slice(cut);
+    const pinned: OllamaMessage[] = task && !kept.some((m) => m.role === 'user' && m.content.includes(task)) ? [{ role: 'user', content: `[Original request, verbatim]\n${task}` }] : [];
     this.history = [
-      { role: 'user', content: `[Checkpoint of earlier work in this session — build on it without restating it; verify file contents again before editing]\n${summary}` },
-      ...this.history.slice(cut),
+      ...pinned,
+      { role: 'user', content: `[Checkpoint of earlier work in this session] Continue from "Next step" below. Do not explore the project again: what you learned is summarized here. Re-read a file only right before you edit it.${changedFiles.length ? `\nFiles you already changed in this task: ${changedFiles.join(', ')}` : ''}\n${summary}` },
+      ...kept,
     ];
     this.lastPromptTokens = 0;
+    return true;
   }
 }

@@ -320,12 +320,14 @@ test('verification gate asks once to run something after unverified code edits; 
         assert.match(user.at(-1)!, /^\[verification\] You changed code but have not run anything/);
         return answer('não há como rodar nada aqui');
       },
+      () => answer('não há como rodar nada aqui'),
     ]);
     assert.equal(await new Session(config(root, { mode: 'auto' }), ui, () => unverified).run('crie a'), 'não há como rodar nada aqui');
 
     const verified = new ScriptedProvider([
       () => call('edit_file', { path: 'src/a.js', old_string: '1', new_string: '2' }),
       () => call('bash', { command: 'node src/a.js' }),
+      () => answer('feito e testado'),
       () => answer('feito e testado'),
     ]);
     assert.equal(await new Session(config(root, { mode: 'auto' }), ui, () => verified).run('mude a'), 'feito e testado');
@@ -338,6 +340,7 @@ test('verification gate asks once to run something after unverified code edits; 
         assert.match(results.at(-1)![0]!.output, /\[loop\] You have edited src\/a\.js 5 times/);
         return call('bash', { command: 'node src/a.js' });
       },
+      () => answer('ok'),
       () => answer('ok'),
     ]);
     assert.equal(await new Session(config(root, { mode: 'auto' }), ui, () => looping).run('ajuste a'), 'ok');
@@ -365,15 +368,18 @@ test('report_conflict ends the task with the explanation, but only after an edit
   }
 });
 
-test('the main agent has no tools that bash covers', async () => {
-  const root = workspace();
+test('toolset per provider: Claude gets bash-only, Ollama models keep the predefined tools', async () => {
   const ui = UI.create();
   try {
-    const provider = new ScriptedProvider([() => call('update_plan', { steps: [] }), () => answer('ok')]);
-    await new Session(config(root), ui, () => provider).run('x');
-    const out = provider.results[0]![0]!.output;
+    const lean = new ScriptedProvider([() => call('update_plan', { steps: [] }), () => answer('ok')]);
+    await new Session(config(workspace(), { provider: 'anthropic' }), ui, () => lean).run('x');
+    const out = lean.results[0]![0]!.output;
     assert.match(out, /^Unknown tool "update_plan"\. Available tools: .*\bbash\b/);
     for (const gone of ['remember', 'run_code', 'list_dir', 'glob', 'grep']) assert.doesNotMatch(out, new RegExp(`\\b${gone}\\b`));
+
+    const full = new ScriptedProvider([() => call('update_plan', { steps: [{ step: 'a', status: 'in_progress' }] }), () => answer('ok')]);
+    await new Session(config(workspace()), ui, () => full).run('x');
+    assert.equal(full.results[0]![0]!.isError, false);
   } finally {
     ui.close();
   }
@@ -409,6 +415,110 @@ test('skills: Claude-compatible SKILL.md discovery, loading on demand, and no to
     await new Session(config(empty), ui, () => noSkills).run('x');
     assert.doesNotMatch(seen[1]!, /<skills>/);
     assert.match(noSkills.results[0]![0]!.output, /^Unknown tool "skill"/);
+  } finally {
+    ui.close();
+  }
+});
+
+test('budget: unverified edits get a verification warning with steps still in reserve', async () => {
+  const root = workspace();
+  const steps: StepResult[] = [call('write_file', { path: 'a.ts', content: 'export const a = 1;\n' })];
+  for (let i = 0; i < 19; i++) steps.push(call('read_file', { path: `missing-${i}.ts` }));
+  let warned = '';
+  const provider = new ScriptedProvider(
+    steps.map((s, i) => ({ results }) => {
+      const out = results.at(-1)?.[0]?.output ?? '';
+      if (out.includes('[budget]')) warned = `${i}|${out}`;
+      return s;
+    }),
+  );
+  const ui = UI.create();
+  await new Session(config(root, { maxSteps: 20 }), ui, () => provider).run('add a');
+  ui.close();
+  assert.match(warned, /^18\|/);
+  assert.match(warned, /Only 2 steps left\. Stop adding new work now: run the type-check/);
+});
+
+test('requirements: after code changes the agent checks every item of the request before finishing', async () => {
+  const root = workspace();
+  const task = 'Do this:\n- create a.ts\n- create b.ts\n- create c.ts';
+  const provider = new ScriptedProvider([
+    () => call('write_file', { path: 'a.ts', content: 'export const a = 1;\n' }),
+    () => call('bash', { command: 'node -e 1' }),
+    () => answer('done'),
+    ({ user }) => {
+      assert.match(user.at(-1)!, /^\[requirements\]/);
+      assert.ok(user.at(-1)!.includes(`<original_request>\n${task}\n</original_request>`));
+      return answer('- create a.ts: PASS\n- create b.ts: FAIL\nreport');
+    },
+  ]);
+  const ui = UI.create();
+  const out = await new Session(config(root), ui, () => provider).run(task);
+  ui.close();
+  assert.match(out, /report$/);
+});
+
+test('report_conflict: without anyone to answer, a question before any edit is refused and the agent implements', async () => {
+  const root = workspace();
+  const provider = new ScriptedProvider([
+    () => call('report_conflict', { kind: 'out_of_scope', explanation: 'Devo começar do zero?' }),
+    ({ results }) => {
+      assert.equal(results.at(-1)![0]!.isError, true);
+      assert.match(results.at(-1)![0]!.output, /^Not reported: nobody is available/);
+      return call('write_file', { path: 'a.ts', content: 'export const a = 1;\n' });
+    },
+    () => call('bash', { command: 'node -e 1' }),
+    () => answer('feito'),
+    () => answer('feito'),
+  ]);
+  const ui = UI.create();
+  assert.equal(await new Session(config(root), ui, () => provider).run('crie a.ts'), 'feito');
+  ui.close();
+});
+
+test('recap: every 30 steps the original request is shown again', async () => {
+  const root = workspace();
+  const task = 'Do this:\n- item one\n- item two';
+  let recap = '';
+  const steps: Script[] = Array.from({ length: 32 }, (_, i) => ({ results }) => {
+    const out = results.at(-1)?.[0]?.output ?? '';
+    if (out.includes('[recap]')) recap = `${i}|${out}`;
+    return call('read_file', { path: `missing-${i}.ts` });
+  });
+  const ui = UI.create();
+  await new Session(config(root, { maxSteps: 32 }), ui, () => new ScriptedProvider(steps)).run(task);
+  ui.close();
+  assert.match(recap, /^30\|/);
+  assert.ok(recap.includes(`<original_request>\n${task}\n</original_request>`));
+});
+
+const ts5 = process.env.TRACKAI_TEST_TS5;
+test('edits that introduce type errors are reverted; unused names are only reported', { skip: !ts5 && 'set TRACKAI_TEST_TS5 to a typescript@5 folder' }, async () => {
+  const root = workspace();
+  fs.mkdirSync(path.join(root, 'src'));
+  fs.mkdirSync(path.join(root, 'node_modules'));
+  fs.symlinkSync(ts5!, path.join(root, 'node_modules/typescript'));
+  fs.writeFileSync(path.join(root, 'tsconfig.json'), JSON.stringify({ compilerOptions: { strict: true, noUnusedLocals: true, lib: ['ES2022'] }, include: ['src'] }));
+  fs.writeFileSync(path.join(root, 'src/a.ts'), 'export const a = 1;\n');
+  const provider = new ScriptedProvider([
+    () => call('edit_file', { path: 'src/a.ts', old_string: 'export const a = 1;', new_string: 'export const a = missingName;' }),
+    ({ results }) => {
+      assert.equal(results.at(-1)![0]!.isError, true);
+      assert.match(results.at(-1)![0]!.output, /^Edit rejected and reverted: .*\n.*TS2304: Cannot find name 'missingName'/);
+      assert.equal(fs.readFileSync(path.join(root, 'src/a.ts'), 'utf8'), 'export const a = 1;\n');
+      return call('edit_file', { path: 'src/a.ts', old_string: 'export const a = 1;', new_string: 'const unused = 2;\nexport const a = 1;' });
+    },
+    ({ results }) => {
+      assert.equal(results.at(-1)![0]!.isError, false, results.at(-1)![0]!.output);
+      assert.match(results.at(-1)![0]!.output, /\[diagnostics\].*\n.*TS6133/);
+      return call('bash', { command: 'node -e 1' });
+    },
+    () => answer('ok'),
+    () => answer('ok'),
+  ]);
+  const ui = UI.create();
+  try {
+    assert.equal(await new Session(config(root), ui, () => provider).run('edite a'), 'ok');
   } finally {
     ui.close();
   }
