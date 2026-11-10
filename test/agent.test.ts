@@ -272,6 +272,55 @@ test('orchestrator: checks that already pass go back to the judge, and review pr
   assert.match(out, /1 problema\(s\) enviados para correção/);
 });
 
+test('orchestrator: when a slice exhausts its attempts the judge rules on the checks, and a wrong check is corrected', async () => {
+  const root = workspace();
+  const judge = stubJudge([
+    { slices: [slice('cria x.txt', 'test -f nope/x.txt')] },
+    { rulings: [{ text: 'cria x.txt', checkIsWrong: true, check: 'test -f x.txt', note: 'caminho errado' }] },
+    { approved: true, problems: [] },
+  ]);
+  const workers = [
+    new ScriptedProvider([]),
+    new ScriptedProvider([() => call('write_file', { path: 'x.txt', content: 'ok' }), () => answer('pronto')]),
+    new ScriptedProvider([() => answer('o código está certo')]),
+    new ScriptedProvider([() => answer('o código está certo')]),
+  ];
+  const ui = UI.create();
+  const out = await orchestrate(new Session(config(root), ui, () => workers.shift()!), 'crie x.txt', judge);
+  ui.close();
+  assert.equal(workers.length, 0);
+  assert.match(judge.prompts[1]!, /<failing_checks>\n- cria x\.txt\n  \$ test -f nope\/x\.txt/);
+  assert.match(out, /✔ cria x\.txt/);
+  assert.match(out, /1\/1 passam/);
+});
+
+test('orchestrator: a criterion that stays red does not block the gate of later slices', async () => {
+  const root = workspace();
+  const judge = stubJudge([
+    { slices: [slice('impossível', 'false'), slice('cria y.txt', 'test -f y.txt')] },
+    { rulings: [{ text: 'impossível', checkIsWrong: false, check: 'false', note: 'faça o impossível' }] },
+    { approved: true, problems: [] },
+  ]);
+  const workers = [
+    new ScriptedProvider([]),
+    ...Array.from({ length: 3 }, () => new ScriptedProvider([() => answer('tentei')])),
+    new ScriptedProvider([
+      ({ user }) => {
+        assert.match(user[0]!, /Diagnosis by the reviewer:\n- impossível: faça o impossível/);
+        return answer('tentei de novo');
+      },
+    ]),
+    new ScriptedProvider([() => call('write_file', { path: 'y.txt', content: 'ok' }), () => answer('pronto')]),
+  ];
+  const ui = UI.create();
+  const out = await orchestrate(new Session(config(root), ui, () => workers.shift()!), 'faça', judge);
+  ui.close();
+  assert.equal(workers.length, 0);
+  assert.match(out, /✖ impossível/);
+  assert.match(out, /✔ cria y\.txt/);
+  assert.match(out, /1\/2 passam/);
+});
+
 test('orchestrator: without the decision engine it stops with an explanation instead of crashing', async () => {
   const ui = UI.create();
   const out = await orchestrate(new Session(config(workspace()), ui, () => new ScriptedProvider([])), 'x', stubJudge([new Error('spawn claude ENOENT')]));

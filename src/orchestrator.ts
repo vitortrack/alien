@@ -1,4 +1,5 @@
 import {
+  arbitratePrompt,
   claudeJudge,
   CONTRACT_SCHEMA,
   contractPrompt,
@@ -9,6 +10,7 @@ import {
   REVIEW_TOOLS,
   reviewPrompt,
   revisePrompt,
+  RULING_SCHEMA,
   runChecks,
   sliceBrief,
   type CheckResult,
@@ -16,6 +18,7 @@ import {
   type Criterion,
   type Judge,
   type Review,
+  type Ruling,
 } from './contract.js';
 import type { Session } from './session.js';
 import type { PlanItem } from './tools.js';
@@ -31,6 +34,27 @@ async function untilGreen(session: Session, brief: string, gate: Criterion[], la
     session.ui.info(`portão de ${label}: ${failed.length} checagem(ns) falharam (tentativa ${attempt}/${GATE_ATTEMPTS})`);
   }
   return failed;
+}
+
+async function settle(session: Session, judge: Judge, brief: string, gate: Criterion[], label: string): Promise<CheckResult[]> {
+  const failed = await untilGreen(session, brief, gate, label);
+  if (!failed.length || session.signal.aborted) return failed;
+  let rulings: Ruling[];
+  try {
+    ({ rulings } = await judge.ask<{ rulings: Ruling[] }>(arbitratePrompt(brief, failed), RULING_SCHEMA, READ_TOOLS));
+  } catch {
+    return failed;
+  }
+  failed.forEach((f, k) => {
+    if (rulings[k]?.checkIsWrong) f.criterion.check = rulings[k]!.check;
+  });
+  const fixedChecks = rulings.filter((r) => r.checkIsWrong).length;
+  session.ui.info(`arbitragem de ${label}: ${fixedChecks} checagem(ns) corrigidas, ${failed.length - fixedChecks} falha(s) no código`);
+  const remaining = (await runChecks(session.cfg.root, gate)).filter((r) => !r.pass);
+  if (!remaining.length) return [];
+  const notes = rulings.filter((r) => !r.checkIsWrong).map((r) => `- ${r.text}: ${r.note}`);
+  await session.spawn('worker', `${failureBrief(brief, remaining)}${notes.length ? `\n\nDiagnosis by the reviewer:\n${notes.join('\n')}` : ''}`);
+  return (await runChecks(session.cfg.root, gate)).filter((r) => !r.pass);
 }
 
 async function writeContract(session: Session, goal: string, judge: Judge): Promise<Contract> {
@@ -61,12 +85,13 @@ export function orchestrate(session: Session, goal: string, judge: Judge = claud
 
     ui.phase('2 · Execução');
     const lines: string[] = [];
+    const accepted: Criterion[] = [];
     for (const [index, slice] of contract.slices.entries()) {
       if (session.signal.aborted) return 'Interrompido pelo usuário.';
       plan[index]!.status = 'in_progress';
       session.setPlan(plan);
-      const gate = contract.slices.slice(0, index + 1).flatMap((s) => s.criteria);
-      const failed = await untilGreen(session, sliceBrief(slice), gate, `"${slice.title}"`);
+      const failed = await settle(session, judge, sliceBrief(slice), [...accepted, ...slice.criteria], `"${slice.title}"`);
+      accepted.push(...slice.criteria.filter((c) => !failed.some((f) => f.criterion === c)));
       plan[index]!.status = 'done';
       session.setPlan(plan);
       lines.push(failed.length ? `✖ ${slice.title} — falhou: ${failed.map((f) => f.criterion.text).join('; ')}` : `✔ ${slice.title}`);
@@ -80,7 +105,7 @@ export function orchestrate(session: Session, goal: string, judge: Judge = claud
       if (!review.approved && review.problems.length) {
         verdict = `${review.problems.length} problema(s) enviados para correção:\n${review.problems.map((p) => `- ${p.file}: ${p.problem}`).join('\n')}`;
         ui.phase('4 · Correções');
-        await untilGreen(session, fixBrief(review.problems, contract.slices), all, 'correções');
+        await settle(session, judge, fixBrief(review.problems, accepted), accepted, 'correções');
       }
     } catch (e) {
       verdict = `não executada: ${e instanceof Error ? e.message : String(e)}`;
