@@ -201,10 +201,12 @@
       return;
     }
     let shown = 0;
-    w.verb.textContent = '';
+    w.verb.innerHTML = '<span class="caret"></span>';
     w.verbTimer = setInterval(() => {
-      w.verb.textContent = word.slice(0, ++shown);
-      if (shown >= word.length) clearInterval(w.verbTimer);
+      w.verb.innerHTML = `${esc(word.slice(0, ++shown))}<span class="caret"></span>`;
+      if (shown < word.length) return;
+      clearInterval(w.verbTimer);
+      w.verb.textContent = word;
     }, 70);
   }
 
