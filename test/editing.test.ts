@@ -64,6 +64,7 @@ function context(root: string): ToolContext {
     files: new Map(),
     allowed: new Set(),
     testEditsAllowed: true,
+    testOriginals: new Map(),
     confirm: async () => 'yes',
     setPlan: () => undefined,
     delegate: async () => '',
@@ -155,5 +156,7 @@ test('test guard: existing assertions are read-only unless the request asks to c
   await assert.rejects(tool('edit_file').run({ path: 'test.mjs', old_string: "'node:assert/strict';\n", new_string: "'node:assert/strict';\nprocess.exit(0);\n" }, ctx), /would skip or short-circuit/);
   assert.match(await tool('edit_file').run({ path: 'test.mjs', old_string: 'calcTotal([1, 2])', new_string: 'computeTotal([1, 2])' }, ctx), /Edited test\.mjs/);
   assert.match(await tool('edit_file').run({ path: 'test.mjs', old_string: '85);\n', new_string: '85);\nassert.equal(discount(50, 50), 25);\n' }, ctx), /Edited test\.mjs/);
+  assert.match(await tool('edit_file').run({ path: 'test.mjs', old_string: 'discount(50, 50), 25);', new_string: 'discount(50, 50), 26);' }, ctx), /Edited test\.mjs/, 'assertions added in this task stay editable');
+  await assert.rejects(tool('edit_file').run({ path: 'test.mjs', old_string: '85);\n', new_string: '86);\n' }, ctx), /changes or removes the existing assertion/);
   assert.match(await tool('edit_file').run({ path: 'test.mjs', old_string: '85);\n', new_string: '90);\n' }, { ...ctx, testEditsAllowed: true }), /Edited test\.mjs/);
 });

@@ -54,6 +54,7 @@ function ctx(answers: Decision[]): ToolContext & { asked: string[] } {
     files: new Map(),
     allowed: new Set(),
     testEditsAllowed: true,
+    testOriginals: new Map(),
     asked,
     confirm: async (q) => {
       asked.push(q);

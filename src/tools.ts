@@ -26,6 +26,7 @@ export interface ToolContext {
   readonly files: Map<string, number>;
   readonly allowed: Set<string>;
   readonly testEditsAllowed: boolean;
+  readonly testOriginals: Map<string, string | null>;
   confirm(question: string, alwaysLabel?: string): Promise<Decision>;
   setPlan(plan: PlanItem[]): void;
   delegate(role: DelegateRole, task: string): Promise<string>;
@@ -232,10 +233,12 @@ const signature = (line: string): string => (line.match(LITERALS) ?? []).join('|
 
 function testGuard(shown: string, before: string | null, after: string, ctx: ToolContext): string | null {
   if (ctx.testEditsAllowed || !TEST_FILE.test(shown)) return null;
+  if (!ctx.testOriginals.has(shown)) ctx.testOriginals.set(shown, before);
+  const original = ctx.testOriginals.get(shown) ?? '';
   const afterLines = after.split('\n').map((l) => l.trim());
   const kept = new Set(afterLines);
   const keptSignatures = new Set(afterLines.filter((l) => ASSERTION.test(l)).map(signature));
-  const changed = (before ?? '')
+  const changed = original
     .split('\n')
     .map((l) => l.trim())
     .find((l) => ASSERTION.test(l) && !kept.has(l) && !keptSignatures.has(signature(l)));
@@ -243,7 +246,7 @@ function testGuard(shown: string, before: string | null, after: string, ctx: Too
   if (changed) {
     return `Change NOT applied: ${shown} is a test file and this edit changes or removes the existing assertion "${changed}". The request does not ask to change tests, so existing assertions are read-only (you may add new tests). ${conflict}`;
   }
-  const beforeLines = new Set((before ?? '').split('\n').map((l) => l.trim()));
+  const beforeLines = new Set(original.split('\n').map((l) => l.trim()));
   const skip = afterLines.find((l) => SKIPS.test(l) && !beforeLines.has(l));
   if (skip) return `Change NOT applied: "${skip}" would skip or short-circuit tests in ${shown}. ${conflict}`;
   return null;

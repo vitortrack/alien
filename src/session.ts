@@ -115,6 +115,7 @@ export class Session {
         return session.signal;
       },
       testEditsAllowed: allowsTestEdits(task),
+      testOriginals: new Map(),
       codeIndex: session.codeIndex,
       memory: session.memory,
       files,
