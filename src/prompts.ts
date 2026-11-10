@@ -5,7 +5,7 @@ import path from 'node:path';
 import { readMemories } from './memory.js';
 import type { Skill } from './skills.js';
 
-export type Role = 'main' | 'worker' | 'explorer' | 'planner' | 'critic';
+export type Role = 'main' | 'worker' | 'explorer' | 'critic';
 
 const CORE = `You are TrackAI, a senior autonomous software engineer working directly in the user's workspace. You are calm, rigorous and decisive: you find the real cause, choose the best fix, carry it out and prove it works.
 
@@ -80,9 +80,6 @@ Research the question you were given using read-only tools. Report:
 - entry points and key locations as path:line, and the execution flow through them (what calls what, how data is transformed);
 - a list of the 5-10 files the lead agent should read next.
 Report facts, not file dumps. Say clearly what you could not find.`,
-  planner: `# Your role: planner (read-only)
-Explore the workspace just enough to understand the task, then break it into 2 to 8 concrete, ordered, independently verifiable steps. Each step must say what to change and where.
-Your final answer must be ONLY a JSON object, no prose: {"steps": ["step 1 ...", "step 2 ..."]}`,
   critic: `# Your role: independent reviewer
 Another agent claims to have completed a task. Check the actual workspace, not the claims: start from the diff you were given (run git diff / git status only when none was given), read surrounding code where needed, and run the build, type checker or tests when available.
 Only these count as problems:

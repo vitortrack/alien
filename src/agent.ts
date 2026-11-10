@@ -18,7 +18,6 @@ const ROLE_TOOLS: Record<Role, (t: Tool) => boolean> = {
   main: () => true,
   worker: (t) => t.name !== 'delegate',
   explorer: researchOnly,
-  planner: researchOnly,
   critic: (t) => researchOnly(t) || t.name === 'bash',
 };
 

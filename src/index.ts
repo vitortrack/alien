@@ -22,7 +22,7 @@ Opções:
   -m, --model <nome>                 padrão: ${DEFAULT_MODEL.ollama} (ollama) · ${DEFAULT_MODEL.anthropic} (anthropic)
       --mode <ask|auto|read-only>    permissão para escrita e bash (padrão: ask)
   -C, --cwd <dir>                    pasta de trabalho (padrão: a atual)
-      --orchestrate                  pipeline planner → workers → revisor
+      --orchestrate                  contrato (Claude) → fatias com portão → revisão
       --attempts <n>                 melhor de N: tentativas isoladas, escolhe a que passa nos testes com o menor diff
       --review                       liga a revisão por um agente crítico (padrão: desligada; a checagem de
                                      escopo e o portão de verificação continuam sempre ativos)

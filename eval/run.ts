@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { bestOf } from '../src/attempts.js';
+import { orchestrate } from '../src/orchestrator.js';
 import { OllamaProvider } from '../src/providers/ollama.js';
 import { AnthropicProvider } from '../src/providers/anthropic.js';
 import { Session, type Config, type ProviderName } from '../src/session.js';
@@ -42,6 +43,7 @@ const { values } = parseArgs({
     attempts: { type: 'string', default: '1' },
     review: { type: 'string', default: 'off' },
     tools: { type: 'string' },
+    orchestrate: { type: 'string', default: 'off' },
   },
 });
 
@@ -123,7 +125,8 @@ async function runOne(s: Scenario, run: number): Promise<RunResult> {
       answer = result.answer;
       session.usage.input = result.usage.input;
       session.usage.output = result.usage.output;
-    } else answer = await session.run(s.task);
+    } else if (values.orchestrate === 'on') answer = await orchestrate(session, s.task);
+    else answer = await session.run(s.task);
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
   }

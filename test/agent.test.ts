@@ -6,7 +6,8 @@ import { test } from 'node:test';
 import { stripVTControlCharacters } from 'node:util';
 import { renderMarkdownLine } from '../src/markdown.js';
 import { memoryFile } from '../src/memory.js';
-import { parsePlan } from '../src/orchestrator.js';
+import type { Judge } from '../src/contract.js';
+import { orchestrate } from '../src/orchestrator.js';
 import { systemPrompt } from '../src/prompts.js';
 import { parseInlineToolCalls } from '../src/providers/ollama.js';
 import { bm25, chunkFile, cosine, tokenize } from '../src/rag.js';
@@ -204,9 +205,78 @@ test('inline tool calls written as text by small models are recovered', () => {
   assert.equal(parseInlineToolCalls('{"name":"rm","arguments":{}}', names).length, 0);
 });
 
-test('planner output is parsed from JSON or from a list', () => {
-  assert.deepEqual(parsePlan('ok:\n{"steps":["a","b"]}'), ['a', 'b']);
-  assert.deepEqual(parsePlan('1. first\n2) second\n- third'), ['first', 'second', 'third']);
+function stubJudge(replies: unknown[]): Judge & { prompts: string[] } {
+  const prompts: string[] = [];
+  return {
+    costUsd: 0,
+    prompts,
+    async ask<T>(prompt: string): Promise<T> {
+      prompts.push(prompt);
+      const reply = replies.shift();
+      if (reply instanceof Error) throw reply;
+      return reply as T;
+    },
+  };
+}
+
+const slice = (title: string, check: string) => ({ title, spec: `faça: ${title}`, files: ['x.txt'], criteria: [{ text: title, check, guard: false }] });
+
+test('orchestrator: a slice goes back to a fresh worker with the gate failures until its checks pass', async () => {
+  const root = workspace();
+  const judge = stubJudge([{ slices: [slice('cria x.txt', 'test -f x.txt')] }, { approved: true, problems: [] }]);
+  const workers = [
+    new ScriptedProvider([]),
+    new ScriptedProvider([() => answer('pronto')]),
+    new ScriptedProvider([
+      ({ user }) => {
+        assert.match(user[0]!, /the gate failed/);
+        assert.match(user[0]!, /\$ test -f x\.txt/);
+        return call('write_file', { path: 'x.txt', content: 'ok' });
+      },
+      () => answer('pronto'),
+    ]),
+  ];
+  const ui = UI.create();
+  const out = await orchestrate(new Session(config(root), ui, () => workers.shift()!), 'crie x.txt', judge);
+  ui.close();
+  assert.equal(workers.length, 0);
+  assert.match(out, /✔ cria x\.txt/);
+  assert.match(out, /Checagens do contrato: 1\/1 passam/);
+  assert.match(out, /Revisão do motor de decisão: aprovada/);
+});
+
+test('orchestrator: checks that already pass go back to the judge, and review problems go to a fix worker', async () => {
+  const root = workspace();
+  const judge = stubJudge([
+    { slices: [slice('cria x.txt', 'true')] },
+    { slices: [slice('cria x.txt', 'test -f x.txt')] },
+    { approved: false, problems: [{ file: 'x.txt', problem: 'texto errado', fix: 'escreva certo' }] },
+  ]);
+  const workers = [
+    new ScriptedProvider([]),
+    new ScriptedProvider([() => call('write_file', { path: 'x.txt', content: 'errado' }), () => answer('pronto')]),
+    new ScriptedProvider([
+      ({ user }) => {
+        assert.match(user[0]!, /texto errado/);
+        return call('read_file', { path: 'x.txt' });
+      },
+      () => call('write_file', { path: 'x.txt', content: 'certo' }),
+      () => answer('corrigido'),
+    ]),
+  ];
+  const ui = UI.create();
+  const out = await orchestrate(new Session(config(root), ui, () => workers.shift()!), 'crie x.txt', judge);
+  ui.close();
+  assert.match(judge.prompts[1]!, /<already_passing>\n- cria x\.txt: true/);
+  assert.equal(fs.readFileSync(path.join(root, 'x.txt'), 'utf8'), 'certo');
+  assert.match(out, /1 problema\(s\) enviados para correção/);
+});
+
+test('orchestrator: without the decision engine it stops with an explanation instead of crashing', async () => {
+  const ui = UI.create();
+  const out = await orchestrate(new Session(config(workspace()), ui, () => new ScriptedProvider([])), 'x', stubJudge([new Error('spawn claude ENOENT')]));
+  ui.close();
+  assert.match(out, /Não foi possível escrever o contrato.*ENOENT/);
 });
 
 test('RAG primitives: tokenizer, chunking, BM25 and cosine', () => {
