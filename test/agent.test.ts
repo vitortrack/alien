@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -377,4 +378,22 @@ test('the main agent has no tools that bash covers', async () => {
   } finally {
     ui.close();
   }
+});
+
+test('workspace snapshot: git status, recent commits and how to check, only when there is something to say', async () => {
+  const { workspaceSnapshot } = await import('../src/prompts.js');
+  const js = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-snap-'));
+  fs.writeFileSync(path.join(js, 'package.json'), '{"scripts":{"test":"node test.mjs","check":"tsc"}}');
+  fs.writeFileSync(path.join(js, 'a.js'), '1');
+  const git = (...a: string[]) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { cwd: js, stdio: 'ignore' });
+  git('init', '-q');
+  git('add', '.');
+  git('commit', '-qm', 'first commit');
+  fs.writeFileSync(path.join(js, 'a.js'), '2');
+  const snap = workspaceSnapshot(js);
+  assert.match(snap, /git status \(1 changed\):\n M a\.js\nrecent commits:\n[0-9a-f]+ first commit\nhow to check changes: npm test \(node test\.mjs\); npm run check \(tsc\)/);
+  const py = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-snap-'));
+  fs.writeFileSync(path.join(py, 'test_slug.py'), '');
+  assert.match(workspaceSnapshot(py), /how to check changes: python3 -m unittest/);
+  assert.equal(workspaceSnapshot(fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-snap-'))), '');
 });

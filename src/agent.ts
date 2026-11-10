@@ -1,4 +1,4 @@
-import { systemPrompt, type Role } from './prompts.js';
+import { systemPrompt, workspaceSnapshot, type Role } from './prompts.js';
 import { changedFiles, nestedInstructions, scopeReport, workspaceDiff } from './scope.js';
 import type { Session } from './session.js';
 import { allTools, cleanPath, describeInput, permit, suggestPath, type Tool, type ToolContext } from './tools.js';
@@ -81,7 +81,8 @@ export class Agent {
     this.verifiedSinceEdit = true;
     this.editsPerFile.clear();
     if (this.role === 'main') void this.session.codeIndex.update(this.session.signal).catch(() => undefined);
-    this.provider.addUser(await this.withRecall(task));
+    const message = await this.withRecall(task);
+    this.provider.addUser(this.role === 'main' ? workspaceSnapshot(cfg.root) + message : message);
     this.session.log({ agent: this.role, event: 'task', task });
     let reviews = 0;
     let failures = 0;

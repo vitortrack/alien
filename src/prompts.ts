@@ -134,6 +134,51 @@ function gitInfo(root: string): string {
   }
 }
 
+function git(root: string, args: string[]): string | null {
+  try {
+    return execFileSync('git', args, { cwd: root, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 5_000_000 }).toString().trimEnd();
+  } catch {
+    return null;
+  }
+}
+
+function checkCommands(root: string): string[] {
+  const commands: string[] = [];
+  let scripts: Record<string, string> = {};
+  try {
+    scripts = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).scripts ?? {};
+  } catch {}
+  for (const name of ['test', 'check', 'typecheck', 'lint', 'build']) {
+    if (scripts[name]) commands.push(`${name === 'test' ? 'npm test' : `npm run ${name}`} (${scripts[name]!.slice(0, 80)})`);
+  }
+  const has = (f: string) => fs.existsSync(path.join(root, f));
+  const pyTests = (dir: string) => {
+    try {
+      return fs.readdirSync(path.join(root, dir)).some((f) => /^test_.*\.py$/.test(f));
+    } catch {
+      return false;
+    }
+  };
+  if (['pytest.ini', 'conftest.py'].some(has) || /pytest/.test(readIfExists(path.join(root, 'pyproject.toml')))) commands.push('python3 -m pytest');
+  else if (pyTests('.') || pyTests('tests')) commands.push('python3 -m unittest');
+  if (/^test:/m.test(readIfExists(path.join(root, 'Makefile')))) commands.push('make test');
+  return commands;
+}
+
+export function workspaceSnapshot(root: string): string {
+  const lines: string[] = [];
+  const status = git(root, ['status', '--porcelain', '--untracked-files=all']);
+  if (status !== null) {
+    const changed = status.split('\n').filter(Boolean);
+    lines.push(changed.length ? `git status (${changed.length} changed):\n${changed.slice(0, 15).join('\n')}${changed.length > 15 ? `\n… ${changed.length - 15} more` : ''}` : 'git status: clean');
+    const log = git(root, ['log', '--oneline', '-5']);
+    if (log) lines.push(`recent commits:\n${log}`);
+  }
+  const commands = checkCommands(root);
+  if (commands.length) lines.push(`how to check changes: ${commands.join('; ')}`);
+  return lines.length ? `<workspace_snapshot>\nTaken when this task started; it does not update.\n${lines.join('\n')}\n</workspace_snapshot>\n\n` : '';
+}
+
 export function systemPrompt(role: Role, root: string, lang: string, interactive = false): string {
   const docs = ['TRACKAI.md', 'AGENTS.md', 'CLAUDE.md', '.claude/CLAUDE.md']
     .map((name) => ({ name, content: readIfExists(path.join(root, name)) }))
