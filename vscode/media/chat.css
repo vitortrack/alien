@@ -371,6 +371,7 @@ details.obs pre {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  #working .alien,
   #working .verb,
   .item.thinking.live::before,
   .item.thinking.live .label,
@@ -444,13 +445,12 @@ details.obs pre {
   display: none;
 }
 
-#working .spin {
-  display: inline-block;
-  width: 1.1em;
+#working .alien {
+  width: 14px;
+  height: 14px;
   flex: none;
-  text-align: center;
-  font-size: 1.1em;
   color: var(--vscode-charts-orange);
+  animation: blink 1s steps(1) infinite;
 }
 
 #working .verb {
