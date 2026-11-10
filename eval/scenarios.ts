@@ -11,13 +11,14 @@ export interface Scenario {
   files: Record<string, string>;
   uncommitted?: Record<string, string>;
   task: string;
+  maxSteps?: number;
   check(dir: string, answer: string): Check;
 }
 
-const TSC = fileURLToPath(new URL('../node_modules/typescript/bin/tsc', import.meta.url));
-const PKG = '{"type":"module","scripts":{"test":"node test.mjs"}}\n';
+export const TSC = fileURLToPath(new URL('../node_modules/typescript/bin/tsc', import.meta.url));
+export const PKG = '{"type":"module","scripts":{"test":"node test.mjs"}}\n';
 
-function runNode(dir: string, code: string): Check {
+export function runNode(dir: string, code: string): Check {
   try {
     const out = execFileSync('node', ['--input-type=module', '-e', code], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000 });
     return { pass: true, detail: out.trim().slice(0, 200) || 'hidden checks passed' };
@@ -27,7 +28,7 @@ function runNode(dir: string, code: string): Check {
   }
 }
 
-function all(...checks: Check[]): Check {
+export function all(...checks: Check[]): Check {
   const failed = checks.find((c) => !c.pass);
   return failed ?? { pass: true, detail: checks.map((c) => c.detail).join(' | ') };
 }
