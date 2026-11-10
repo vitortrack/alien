@@ -51,6 +51,7 @@ function ctx(answers: Decision[]): ToolContext & { asked: string[] } {
     signal: new AbortController().signal,
     codeIndex: undefined as never,
     memory: undefined as never,
+    skills: [],
     files: new Map(),
     allowed: new Set(),
     testEditsAllowed: true,

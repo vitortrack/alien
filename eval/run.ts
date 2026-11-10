@@ -10,7 +10,7 @@ import { Session, type Config, type ProviderName } from '../src/session.js';
 import type { Provider, StepResult, ToolResult } from '../src/types.js';
 import { UI } from '../src/ui.js';
 import { englishInProse } from './language.js';
-import { hardScenarios, impossibleScenarios, longScenarios, realScenarios, scenarios, type Scenario } from './scenarios.js';
+import { hardScenarios, impossibleScenarios, longScenarios, realScenarios, scenarios, skillScenarios, type Scenario } from './scenarios.js';
 
 type Trace = { texts: string[]; steps: number; toolErrors: Record<string, number>; toolCalls: Record<string, number> };
 type RunResult = {
@@ -46,6 +46,7 @@ const { values } = parseArgs({
 
 const outDir = path.join(path.dirname(new URL(import.meta.url).pathname), 'results', `${new Date().toISOString().replace(/[:.]/g, '-')}-${values.label}`);
 fs.mkdirSync(outDir, { recursive: true });
+process.env.TRACKAI_USER_SKILLS = 'off';
 process.env.TRACKAI_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-eval-home-'));
 
 function git(dir: string, ...args: string[]): void {
@@ -161,7 +162,7 @@ async function pool<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>
   return results;
 }
 
-const suites: Record<string, Scenario[]> = { base: scenarios, hard: hardScenarios, real: realScenarios, impossible: impossibleScenarios, long: longScenarios, all: [...scenarios, ...hardScenarios, ...realScenarios] };
+const suites: Record<string, Scenario[]> = { base: scenarios, hard: hardScenarios, real: realScenarios, impossible: impossibleScenarios, long: longScenarios, skills: skillScenarios, all: [...scenarios, ...hardScenarios, ...realScenarios] };
 const selected = (suites[values.suite!] ?? suites.all!).filter((s) => !values.filter || s.id.includes(values.filter));
 const jobs = selected.flatMap((s) => Array.from({ length: Number(values.runs) }, (_, k) => ({ s, run: k + 1 })));
 console.log(`TrackAI eval · ${values.provider}/${values.model} · ${selected.length} cenários × ${values.runs} = ${jobs.length} execuções → ${outDir}`);

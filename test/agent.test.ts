@@ -12,11 +12,11 @@ import { parseInlineToolCalls } from '../src/providers/ollama.js';
 import { bm25, chunkFile, cosine, tokenize } from '../src/rag.js';
 import { Session, type Config } from '../src/session.js';
 import { cleanPath, isDangerous, safePath, suggestPath } from '../src/tools.js';
-import type { Provider, StepResult, ToolResult } from '../src/types.js';
+import type { Provider, StepRequest, StepResult, ToolResult } from '../src/types.js';
 import { UI } from '../src/ui.js';
 import { validateInput } from '../src/validate.js';
 
-type Script = (seen: { user: string[]; results: ToolResult[][] }) => StepResult;
+type Script = (seen: { user: string[]; results: ToolResult[][]; system: string }) => StepResult;
 
 class ScriptedProvider implements Provider {
   readonly user: string[] = [];
@@ -37,10 +37,10 @@ class ScriptedProvider implements Provider {
     this.user.splice(0, this.user.length, ...s.user);
     this.results.splice(0, this.results.length, ...s.results);
   }
-  async step(): Promise<StepResult> {
+  async step(req: StepRequest): Promise<StepResult> {
     const next = this.script[this.turn++];
     if (!next) throw new Error('script exhausted');
-    return next({ user: this.user, results: this.results });
+    return next({ user: this.user, results: this.results, system: req.system });
   }
 }
 
@@ -374,6 +374,41 @@ test('the main agent has no tools that bash covers', async () => {
     const out = provider.results[0]![0]!.output;
     assert.match(out, /^Unknown tool "update_plan"\. Available tools: .*\bbash\b/);
     for (const gone of ['remember', 'run_code', 'list_dir', 'glob', 'grep']) assert.doesNotMatch(out, new RegExp(`\\b${gone}\\b`));
+  } finally {
+    ui.close();
+  }
+});
+
+test('skills: Claude-compatible SKILL.md discovery, loading on demand, and no tool when there are none', async () => {
+  const { findSkills, frontmatter, readSkill } = await import('../src/skills.js');
+  process.env.TRACKAI_USER_SKILLS = 'off';
+  const root = workspace();
+  const write = (f: string, c: string) => {
+    fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true });
+    fs.writeFileSync(path.join(root, f), c);
+  };
+  assert.deepEqual(frontmatter('---\nname: "a"\ndescription: >\n  first\n  second\nlicense: MIT\n---\nbody').fields, { name: 'a', description: 'first second', license: 'MIT' });
+  write('.claude/skills/new-endpoint/SKILL.md', '---\nname: new-endpoint\ndescription: Use when adding an HTTP endpoint.\nallowed-tools: Bash\n---\n# Steps\nPut it behind a flag.\n');
+  write('.claude/skills/new-endpoint/reference/flags.md', 'flag naming');
+  write('.agents/skills/new-endpoint/SKILL.md', '---\nname: new-endpoint\ndescription: shadowed\n---\nignored');
+  write('.agents/skills/other/SKILL.md', '---\ndescription: Folder name is the fallback name.\n---\nx');
+  const skills = findSkills(root);
+  assert.deepEqual(skills.map((s) => [s.name, s.description]), [['new-endpoint', 'Use when adding an HTTP endpoint.'], ['other', 'Folder name is the fallback name.']]);
+  assert.match(readSkill(skills, 'new-endpoint'), /^# Steps\nPut it behind a flag\.\n\n\[Other files in this skill .*reference\/flags\.md\]$/);
+  assert.equal(readSkill(skills, 'new-endpoint', 'reference/flags.md'), 'flag naming');
+  assert.throws(() => readSkill(skills, 'new-endpoint', '../../../package.json'), /inside the skill folder/);
+
+  const ui = UI.create();
+  try {
+    const seen: string[] = [];
+    const withSkills = new ScriptedProvider([({ system }) => (seen.push(system), call('skill', { name: 'new-endpoint' })), ({ results }) => answer(results.at(-1)![0]!.output)]);
+    assert.match(await new Session(config(root), ui, () => withSkills).run('adicione um endpoint'), /Put it behind a flag/);
+    assert.match(seen[0]!, /<skills>[\s\S]*- new-endpoint: Use when adding an HTTP endpoint\./);
+    const empty = workspace();
+    const noSkills = new ScriptedProvider([({ system }) => (seen.push(system), call('skill', { name: 'x' })), () => answer('ok')]);
+    await new Session(config(empty), ui, () => noSkills).run('x');
+    assert.doesNotMatch(seen[1]!, /<skills>/);
+    assert.match(noSkills.results[0]![0]!.output, /^Unknown tool "skill"/);
   } finally {
     ui.close();
   }

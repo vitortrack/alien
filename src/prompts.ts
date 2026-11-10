@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readMemories } from './memory.js';
+import type { Skill } from './skills.js';
 
 export type Role = 'main' | 'worker' | 'explorer' | 'planner' | 'critic';
 
@@ -134,7 +135,7 @@ function gitInfo(root: string): string {
   }
 }
 
-export function systemPrompt(role: Role, root: string, lang: string, interactive = false): string {
+export function systemPrompt(role: Role, root: string, lang: string, interactive = false, skills: Skill[] = []): string {
   const docs = ['TRACKAI.md', 'AGENTS.md', 'CLAUDE.md', '.claude/CLAUDE.md']
     .map((name) => ({ name, content: readIfExists(path.join(root, name)) }))
     .filter((d) => d.content)
@@ -158,6 +159,8 @@ export function systemPrompt(role: Role, root: string, lang: string, interactive
     `<environment>\n${env}\n</environment>`,
     docs && `<project_instructions>\nFollow these project instructions; they override the defaults above.\n${docs}\n</project_instructions>`,
     memory && `<project_memory>\n${memory}\n</project_memory>`,
+    skills.length &&
+      `<skills>\nSkills are step-by-step guides for recurring tasks. Before acting on a task that matches a skill's description, load it with the skill tool and follow it; it overrides your defaults.\n${skills.map((s) => `- ${s.name}: ${s.description}`).join('\n')}\n</skills>`,
   ]
     .filter(Boolean)
     .join('\n\n');

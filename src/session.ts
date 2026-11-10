@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Agent } from './agent.js';
 import { MemoryStore } from './memory.js';
+import { findSkills, type Skill } from './skills.js';
 import type { Role } from './prompts.js';
 import { AnthropicProvider, type Effort } from './providers/anthropic.js';
 import { trackaiHome } from './paths.js';
@@ -68,6 +69,7 @@ export class Session {
   private readonly logFile: string | null;
   readonly codeIndex: CodeIndex;
   readonly memory: MemoryStore;
+  readonly skills: Skill[];
   readonly allowed = new Set<string>();
   readonly sessions: SessionStore;
   id = newSessionId();
@@ -82,6 +84,7 @@ export class Session {
     const embedder = new Embedder(cfg.embedModel);
     this.codeIndex = new CodeIndex(cfg.root, embedder);
     this.memory = new MemoryStore(cfg.root, embedder);
+    this.skills = findSkills(cfg.root);
     this.sessions = new SessionStore(cfg.root);
     this.main = new Agent(this, 'main', ui);
     this.logFile = cfg.logDir ? path.join(cfg.logDir, `${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`) : null;
@@ -118,6 +121,7 @@ export class Session {
       testOriginals: new Map(),
       codeIndex: session.codeIndex,
       memory: session.memory,
+      skills: session.skills,
       files,
       allowed: session.allowed,
       confirm: (question, alwaysLabel) => ui.confirm(question, session.signal, alwaysLabel),

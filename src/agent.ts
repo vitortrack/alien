@@ -7,7 +7,7 @@ import type { AgentUI } from './agent-ui.js';
 import { validateInput } from './validate.js';
 import { isReadOnlyCommand } from './shell.js';
 
-const researchOnly = (t: Tool): boolean => t.readOnly && !['delegate', 'update_plan', 'remember', 'report_conflict'].includes(t.name);
+const researchOnly = (t: Tool): boolean => t.readOnly && !['delegate', 'update_plan', 'remember', 'report_conflict', 'skill'].includes(t.name);
 
 const BASH_COVERS = ['update_plan', 'remember', 'run_code', 'list_dir', 'glob', 'grep'];
 
@@ -54,7 +54,7 @@ export class Agent {
   ) {
     this.provider = session.newProvider();
     const only = session.cfg.tools;
-    this.tools = allTools.filter((t) => ROLE_TOOLS[role](t) && (!only || only.includes(t.name)));
+    this.tools = allTools.filter((t) => ROLE_TOOLS[role](t) && (!only || only.includes(t.name)) && (t.name !== 'skill' || session.skills.length > 0));
   }
 
   snapshot(): unknown {
@@ -68,7 +68,7 @@ export class Agent {
   private get system(): string {
     const { root, lang, interactive = false } = this.session.cfg;
     const key = `${lang}|${interactive}`;
-    if (this.systemCache?.key !== key) this.systemCache = { key, text: systemPrompt(this.role, root, lang, interactive) };
+    if (this.systemCache?.key !== key) this.systemCache = { key, text: systemPrompt(this.role, root, lang, interactive, this.tools.some((t) => t.name === 'skill') ? this.session.skills : []) };
     return this.systemCache.text;
   }
 

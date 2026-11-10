@@ -6,6 +6,7 @@ import { applyEdit, snippet } from './editing.js';
 import type { MemoryStore } from './memory.js';
 import { isReadOnlyCommand, programOf } from './shell.js';
 import type { CodeIndex } from './rag.js';
+import { readSkill, type Skill } from './skills.js';
 import { syntaxError } from './syntax.js';
 import type { Input, ToolSpec } from './types.js';
 
@@ -23,6 +24,7 @@ export interface ToolContext {
   readonly signal: AbortSignal;
   readonly codeIndex: CodeIndex;
   readonly memory: MemoryStore;
+  readonly skills: Skill[];
   readonly files: Map<string, number>;
   readonly allowed: Set<string>;
   readonly testEditsAllowed: boolean;
@@ -574,6 +576,22 @@ export const allTools: Tool[] = [
       const quoted = `'${str(i, 'code').replace(/'/g, `'\\''`)}'`;
       const seconds = Math.min(600, Math.max(1, num(i, 'timeout_seconds', 60)));
       return runBash(`${str(i, 'language') === 'python' ? 'python3 -c' : 'node --input-type=module -e'} ${quoted}`, ctx, seconds * 1000);
+    },
+  },
+  {
+    name: 'skill',
+    readOnly: true,
+    description: 'Load a skill listed in <skills>: its full instructions, or one of its other files. Load it before acting on a task that matches its description, then follow it.',
+    schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Skill name as listed in <skills>' },
+        file: { type: 'string', description: 'Optional: another file inside the skill folder, as listed when the skill was loaded' },
+      },
+      required: ['name'],
+    },
+    run(i, ctx) {
+      return Promise.resolve(clip(readSkill(ctx.skills, str(i, 'name'), opt(i, 'file'))));
     },
   },
   {

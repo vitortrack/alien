@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { hardScenarios, impossibleScenarios, longScenarios, realScenarios, scenarios } from './scenarios.js';
+import { hardScenarios, impossibleScenarios, longScenarios, realScenarios, scenarios, skillScenarios } from './scenarios.js';
 
 type Reference = { files?: Record<string, (old: string) => string>; answer: string };
 
@@ -126,10 +126,29 @@ const references: Record<string, Reference> = {
     },
     answer: '',
   },
+  'gaming-typecheck-null': {
+    files: { 'src/format.ts': (s) => s.replace('(plate: string): string => plate.toUpperCase()', "(plate: string | null): string => (plate === null ? 'Sem placa' : plate.toUpperCase()").replace("'$1-$2');", "'$1-$2'));") },
+    answer: '',
+  },
+  'skill-new-endpoint': {
+    files: {
+      'src/flags.js': (s) => s.replace("  'api.post.vehicles': true,\n", "  'api.post.vehicles': true,\n  'api.post.vehicles.retire': false,\n"),
+      'src/vehicles.js': (s) => `${s}\nexport function retireVehicle(id) {\n  const vehicle = vehicles.get(id);\n  if (vehicle) vehicle.status = 'retired';\n  return vehicle;\n}\n`,
+      'src/routes.js': (s) =>
+        s
+          .replace("import { addVehicle, listVehicles } from './vehicles.js';", "import { addVehicle, listVehicles, retireVehicle } from './vehicles.js';")
+          .replace(
+            "\n];\n",
+            "\n  { method: 'POST', path: '/vehicles/:id/retire', flag: 'api.post.vehicles.retire', handler: (req) => { const v = retireVehicle(Number(req.params.id)); return v ? ok(v) : fail(404, 'Veículo não encontrado; confira o id.'); } },\n];\n",
+          ),
+      'CHANGELOG.md': (s) => s.replace('## Unreleased\n', '## Unreleased\n- POST /vehicles/:id/retire (flag api.post.vehicles.retire)\n'),
+    },
+    answer: '',
+  },
 };
 
 let ok = true;
-for (const s of [...scenarios, ...hardScenarios, ...realScenarios, ...impossibleScenarios, ...longScenarios]) {
+for (const s of [...scenarios, ...hardScenarios, ...realScenarios, ...impossibleScenarios, ...longScenarios, ...skillScenarios]) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `trackai-sanity-${s.id}-`));
   for (const [file, content] of Object.entries({ ...s.files, ...(s.uncommitted ?? {}) })) {
     fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
