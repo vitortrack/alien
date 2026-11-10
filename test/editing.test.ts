@@ -157,3 +157,29 @@ test('test guard: existing assertions are read-only unless the request asks to c
   assert.match(await tool('edit_file').run({ path: 'test.mjs', old_string: '85);\n', new_string: '85);\nassert.equal(discount(50, 50), 25);\n' }, ctx), /Edited test\.mjs/);
   assert.match(await tool('edit_file').run({ path: 'test.mjs', old_string: '85);\n', new_string: '90);\n' }, { ...ctx, testEditsAllowed: true }), /Edited test\.mjs/);
 });
+
+test('references: definition, callers and importers across .js→.ts, @/ alias and Python imports', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-refs-'));
+  const files: Record<string, string> = {
+    'src/pricing.ts': 'export function calcTotal(items: number[]) {\n  return items.reduce((a, b) => a + b, 0);\n}\n',
+    'src/checkout.js': "import { calcTotal } from './pricing.js';\nexport const pay = (i) => calcTotal(i) * 1.1;\n",
+    'src/report.js': "import { calcTotal as t } from '@/pricing';\nexport const line = (i) => t(i);\n",
+    'src/orphan.js': 'export const calcTotals = 1;\n',
+    'pkg/util.py': 'def helper():\n    return 1\n',
+    'pkg/other.py': 'from .util import helper\n',
+    'app.py': 'from pkg.util import helper\nprint(helper())\n',
+  };
+  for (const [f, c] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true });
+    fs.writeFileSync(path.join(root, f), c);
+  }
+  const ctx = context(root);
+  const sym = await tool('references').run({ target: 'calcTotal' }, ctx);
+  assert.match(sym, /Defined \(1\):\nsrc\/pricing\.ts:1 /);
+  assert.match(sym, /References \(3 lines in 2 files\)/);
+  assert.match(sym, /Files that import src\/pricing\.ts: src\/checkout\.js:1, src\/report\.js:1/);
+  assert.doesNotMatch(sym, /orphan/);
+  assert.match(await tool('references').run({ target: 'src/orphan.js' }, ctx), /Nothing in the repository imports src\/orphan\.js/);
+  assert.match(await tool('references').run({ target: 'pkg/util.py' }, ctx), /\(2\):\napp\.py:1 .*\npkg\/other\.py:1 /);
+  assert.match(await tool('references').run({ target: 'missingThing' }, ctx), /No code file mentions missingThing/);
+});

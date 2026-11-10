@@ -6,6 +6,7 @@ import { applyEdit, snippet } from './editing.js';
 import type { MemoryStore } from './memory.js';
 import { isReadOnlyCommand, programOf } from './shell.js';
 import type { CodeIndex } from './rag.js';
+import { references } from './references.js';
 import { syntaxError } from './syntax.js';
 import type { Input, ToolSpec } from './types.js';
 
@@ -375,6 +376,20 @@ export const allTools: Tool[] = [
         if ((e as { code?: unknown }).code === 1) return 'No matches.';
         throw e;
       }
+    },
+  },
+  {
+    name: 'references',
+    readOnly: true,
+    description:
+      'Find where a symbol (function, class, variable) is defined and every line that references it, or, given the path of a code file, which files import it (resolves relative paths, index files, .js→.ts, "@/" and Python imports). Use it to trace callers and before renaming, changing a signature, moving or deleting code.',
+    schema: {
+      type: 'object',
+      properties: { target: { type: 'string', description: 'Symbol name (e.g. "calcTotal") or file path relative to the workspace (e.g. "src/lib/money.js")' } },
+      required: ['target'],
+    },
+    async run(i, ctx) {
+      return clip(await references(ctx.root, str(i, 'target')));
     },
   },
   {
