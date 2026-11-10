@@ -112,6 +112,8 @@
 
   const pick = () => words[Math.floor(Math.random() * words.length)];
   const seconds = (w) => Math.max(1, Math.round((Date.now() - w.started) / 1000));
+  const toolCount = (w) => (w.tools ? ` · ${w.tools} ${w.tools === 1 ? 'ferramenta' : 'ferramentas'}` : '');
+  const compact = (n) => n.toLocaleString('pt-BR', { notation: 'compact', maximumFractionDigits: 1 });
 
   function scroll() {
     messages.scrollTop = messages.scrollHeight;
@@ -133,7 +135,7 @@
     el.open = true;
     el.innerHTML = `<summary>${ALIEN}<span class="verb">Trabalhando…</span><span class="meta"></span></summary><div class="work-body"></div>`;
     messages.appendChild(el);
-    working.innerHTML = `${ALIEN}<span class="verb"></span><span class="meta"></span><span class="hint">Parar para interromper</span>`;
+    working.innerHTML = `${ALIEN}<span class="verb"></span><span class="meta"></span>`;
     working.hidden = false;
     work = {
       el,
@@ -143,6 +145,7 @@
       summaryMeta: el.querySelector('.meta'),
       started: Date.now(),
       tools: 0,
+      tokens: '',
       tick: 0,
       thoughtEl: null,
       thoughtText: '',
@@ -150,8 +153,8 @@
     const w = work;
     const paint = () => {
       if (w.tick % 4 === 0) w.verb.textContent = `${pick()}…`;
-      const meta = `${seconds(w)}s${w.tools ? ` · ${w.tools} ${w.tools === 1 ? 'ferramenta' : 'ferramentas'}` : ''}`;
-      w.meta.textContent = meta;
+      const meta = `${seconds(w)}s${toolCount(w)}${w.tokens}`;
+      w.meta.textContent = `(${meta})`;
       w.summaryMeta.textContent = meta;
       w.tick++;
     };
@@ -173,9 +176,8 @@
       w.el.remove();
       return;
     }
-    const tools = w.tools ? ` · ${w.tools} ${w.tools === 1 ? 'ferramenta' : 'ferramentas'}` : '';
     w.el.querySelector('.verb').textContent = state === 'done' ? `Pensou por ${seconds(w)}s` : `Interrompido após ${seconds(w)}s`;
-    w.summaryMeta.textContent = tools.replace(/^ · /, '');
+    w.summaryMeta.textContent = `${toolCount(w)}${w.tokens}`.replace(/^ · /, '');
     w.el.open = false;
   }
 
@@ -231,6 +233,9 @@
       }
       case 'thinking':
         startWork();
+        break;
+      case 'tokens':
+        if (work && m.input + m.output) work.tokens = ` · ↑ ${compact(m.input)} ↓ ${compact(m.output)} tokens`;
         break;
       case 'tool': {
         const w = startWork();

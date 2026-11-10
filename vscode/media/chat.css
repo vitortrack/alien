@@ -77,10 +77,8 @@ body {
 }
 
 .msg.user {
-  align-self: flex-end;
-  max-width: 90%;
-  background: var(--vscode-button-background);
-  color: var(--vscode-button-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
 }
 
 .msg.assistant {
@@ -314,6 +312,18 @@ details.obs pre {
   }
 }
 
+#messages > *,
+.work-body > * {
+  animation: enter 0.25s ease-out;
+}
+
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
 @keyframes pulse {
   50% {
     opacity: 0.45;
@@ -324,7 +334,9 @@ details.obs pre {
   #working .alien,
   #working .verb,
   .work.active .alien,
-  .work.active .verb {
+  .work.active .verb,
+  #messages > *,
+  .work-body > * {
     animation: none;
   }
 }
@@ -385,9 +397,7 @@ details.obs pre {
   align-items: center;
   gap: 6px;
   padding: 6px 12px;
-  border-top: 1px solid var(--vscode-panel-border);
-  color: var(--vscode-descriptionForeground);
-  font-size: 0.92em;
+  color: var(--vscode-textLink-foreground);
 }
 
 #working[hidden] {
@@ -403,19 +413,12 @@ details.obs pre {
 }
 
 #working .verb {
-  color: var(--vscode-foreground);
-  font-style: italic;
   animation: pulse 1.6s ease-in-out infinite;
 }
 
 #working .meta {
+  color: var(--vscode-descriptionForeground);
   font-size: 0.9em;
-}
-
-#working .hint {
-  margin-left: auto;
-  font-size: 0.85em;
-  opacity: 0.7;
 }
 
 #composer {

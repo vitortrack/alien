@@ -244,6 +244,10 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
     }
     this.post({ type: 'status', text: `${session.cfg.provider} · ${session.cfg.model} · ${session.cfg.mode}` });
     this.post({ type: 'busy', value: true });
+    const start = { ...session.usage };
+    const tokens = () => this.post({ type: 'tokens', input: session.usage.input - start.input, output: session.usage.output - start.output });
+    const timer = setInterval(tokens, 1000);
+    let report: Message;
     try {
       let out: string;
       if (viaOrchestrator) out = await orchestrate(session, task);
@@ -255,15 +259,17 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
         out = await session.run(task);
         void this.state.update(OPEN_SESSION, session.id);
       }
-      if (STOP_PREFIXES.some((p) => out.startsWith(p))) this.post({ type: 'warn', message: out });
-      else this.post({ type: 'answer', text: out });
+      if (STOP_PREFIXES.some((p) => out.startsWith(p))) report = { type: 'warn', message: out };
+      else report = { type: 'answer', text: out };
     } catch (e) {
-      this.post({ type: 'error', message: e instanceof Error ? e.message : String(e) });
-    } finally {
-      const cost = session.costUsd();
-      this.post({ type: 'usage', input: session.usage.input, output: session.usage.output, cost });
-      this.post({ type: 'busy', value: false });
+      report = { type: 'error', message: e instanceof Error ? e.message : String(e) };
     }
+    clearInterval(timer);
+    tokens();
+    this.post(report);
+    const cost = session.costUsd();
+    this.post({ type: 'usage', input: session.usage.input, output: session.usage.output, cost });
+    this.post({ type: 'busy', value: false });
   }
 
   private async open(file: string, line: number): Promise<void> {
