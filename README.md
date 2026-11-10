@@ -122,7 +122,7 @@ A saída é Markdown renderizado no terminal (títulos, listas, negrito, blocos 
 | **1. Núcleo cognitivo** | Persona de engenheiro sênior, método de resolução (evidência → causa raiz → decisão → verificação → reflexão → aprendizado), guardrails (escopo, segredos, ações destrutivas) e um prompt por papel (main, worker, explorer, planner, critic). Instruções do projeto em `TRACKAI.md`, `AGENTS.md` ou `CLAUDE.md` são carregadas automaticamente. | `src/prompts.ts` |
 | **2. Memória** | **Curto prazo:** histórico da sessão, com compactação automática (resumo) quando a janela do modelo enche. **Longo prazo:** banco vetorial em `.trackai/memory.jsonl` com *fatos*, *lições* e *episódios*; as lembranças relevantes são recuperadas no início de cada tarefa, os episódios são gravados ao concluir e o agente grava fatos e lições com `remember`. | `src/memory.ts`, `src/providers/ollama.ts` |
 | **3. Planejamento** | Laço ReAct; `update_plan` (decomposição em subobjetivos); planner dedicado no modo `--orchestrate`; autocorreção (o erro volta como observação estruturada, e após 3 falhas seguidas o agente é instruído a mudar de estratégia); antes de concluir, **portão de verificação** (se mexeu em código e não rodou nada depois da última edição, pede uma vez para rodar testes/build) e **checagem de escopo** (áreas do diff que o pedido não menciona); revisor independente opcional (`--review`). | `src/agent.ts`, `src/orchestrator.ts` |
-| **4. Ferramentas** | `read_file`, `write_file`, `edit_file`, `list_dir`, `glob`, `grep`, `semantic_search` (RAG), `bash`, `run_code` (Python/Node), `web_fetch`, `update_plan`, `delegate`, `remember`, `recall`. Entradas validadas contra o schema; caminhos presos ao workspace (inclusive via symlink); permissões por modo; detecção de comandos destrutivos. | `src/tools.ts`, `src/validate.ts` |
+| **4. Ferramentas** | `read_file`, `write_file`, `edit_file`, `list_dir`, `glob`, `grep`, `semantic_search` (RAG), `bash`, `run_code` (Python/Node), `web_fetch`, `update_plan`, `delegate`, `remember`, `recall`, `report_conflict` (encerra a tarefa relatando que um teste ou o código contradiz o pedido, em vez de contornar; só aceito depois de editar e rodar algo). Entradas validadas contra o schema; caminhos presos ao workspace (inclusive via symlink); permissões por modo; detecção de comandos destrutivos. | `src/tools.ts`, `src/validate.ts` |
 | **5. Observabilidade** | Trace de cada passo (texto do modelo, chamadas, resultados, tokens e custo) em `~/.trackai/sessions/*.jsonl`; contagem de tokens e custo estimado ao fim de cada tarefa; travas contra loop (limite de passos, chamada idêntica repetida, orçamento de tokens) e Ctrl+C para interromper. | `src/session.ts`, `src/agent.ts` |
 
 **Multiagente.** O agente principal age como gerente: delega pesquisa ampla a *explorers* (somente leitura, rodam em paralelo) e subtarefas independentes a *workers*, e cada sub-agente começa com contexto limpo. No `--orchestrate`, o pipeline é fixo: planner → um worker por passo → revisor → correções.
@@ -134,6 +134,7 @@ A saída é Markdown renderizado no terminal (títulos, listas, negrito, blocos 
 ## Edição de arquivos
 
 - **Aviso de loop:** na 5ª edição do mesmo arquivo (e a cada 3 depois) o agente é avisado para reler o erro e mudar de abordagem.
+- **Testes protegidos:** se o pedido não fala em mexer em testes, alterar ou remover uma asserção existente, ou acrescentar `skip`/`process.exit`, é recusado e o agente é orientado a usar `report_conflict`. Renomear símbolos e acrescentar testes novos continua livre.
 - **Numeração:** criar `NNN_algo.sql` (ou `NNN-…`) numa pasta onde esse número já existe gera aviso com o próximo número livre.
 - **Leia antes de editar:** `edit_file`/`write_file` recusam arquivo não lido ou alterado desde a leitura (por comando, usuário ou outro agente).
 - **Casamento tolerante em cascata** (como aider/Codex): exato → ignorando espaços no fim → ignorando indentação (reindenta a substituição, inclusive tab ↔ espaços) → pontuação unicode. Arquivos CRLF são editados de forma transparente.
@@ -151,7 +152,7 @@ npm run eval -- --model qwen3:8b                     # compara outro modelo
 npm run eval:retrieval                               # benchmark do RAG sobre ../detrorjweb
 ```
 
-17 cenários com testes escondidos (bugs, feature, refatoração, diff, CRLF/tabs, blocos duplicados, Python, escopo, perguntas). Mede acerto, passos, tokens, tempo, falhas de ferramenta e inglês na prosa; resultados em `eval/results/`.
+17 cenários com testes escondidos (bugs, feature, refatoração, diff, CRLF/tabs, blocos duplicados, Python, escopo, perguntas). A suíte `impossible` (fora de `all`) traz um teste visível que contradiz o pedido e mede se o agente trapaceia ou relata o conflito. Mede acerto, passos, tokens, tempo, falhas de ferramenta e inglês na prosa; resultados em `eval/results/`.
 
 ## Desenvolvimento
 

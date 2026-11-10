@@ -345,3 +345,22 @@ test('verification gate asks once to run something after unverified code edits; 
     ui.close();
   }
 });
+
+test('report_conflict ends the task with the explanation, but only after an edit and a run since it', async () => {
+  const root = workspace();
+  const ui = UI.create();
+  try {
+    const refused = ({ results }: { results: ToolResult[][] }) => assert.match(results.at(-1)![0]!.output, /^Not reported yet: first implement/);
+    const provider = new ScriptedProvider([
+      () => call('report_conflict', { kind: 'test_contradicts_request', explanation: 'sem editar' }),
+      (r) => (refused(r), call('write_file', { path: 'src/d.js', content: 'export const d = (p, x) => p * (1 - x / 100);\n' })),
+      () => call('report_conflict', { kind: 'test_contradicts_request', explanation: 'sem rodar' }),
+      (r) => (refused(r), call('bash', { command: 'node src/d.js' })),
+      () => call('report_conflict', { kind: 'test_contradicts_request', explanation: 'Implementei 10% de 100 = 90; test.mjs:3 espera 85 e contradiz o pedido.' }),
+    ]);
+    const out = await new Session(config(root, { review: true, mode: 'auto' }), ui, () => provider).run('implemente d');
+    assert.equal(out, 'Implementei 10% de 100 = 90; test.mjs:3 espera 85 e contradiz o pedido.');
+  } finally {
+    ui.close();
+  }
+});

@@ -9,7 +9,7 @@ import { OllamaProvider } from './providers/ollama.js';
 import { CodeIndex, Embedder } from './rag.js';
 import { workspaceDiff } from './scope.js';
 import { newSessionId, SessionStore, type SavedSession, type Turn } from './sessions.js';
-import { clip, type Mode, type PlanItem, type ToolContext } from './tools.js';
+import { allowsTestEdits, clip, type Mode, type PlanItem, type ToolContext } from './tools.js';
 import type { Provider, Usage } from './types.js';
 import type { AgentUI } from './agent-ui.js';
 
@@ -103,7 +103,7 @@ export class Session {
     return this.makeProvider();
   }
 
-  context(ui: AgentUI, files: Map<string, number> = new Map()): ToolContext {
+  context(ui: AgentUI, files: Map<string, number> = new Map(), task = ''): ToolContext {
     const session = this;
     return {
       root: session.cfg.root,
@@ -113,6 +113,7 @@ export class Session {
       get signal() {
         return session.signal;
       },
+      testEditsAllowed: allowsTestEdits(task),
       codeIndex: session.codeIndex,
       memory: session.memory,
       files,

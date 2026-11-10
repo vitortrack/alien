@@ -25,6 +25,7 @@ export interface ToolContext {
   readonly memory: MemoryStore;
   readonly files: Map<string, number>;
   readonly allowed: Set<string>;
+  readonly testEditsAllowed: boolean;
   confirm(question: string, alwaysLabel?: string): Promise<Decision>;
   setPlan(plan: PlanItem[]): void;
   delegate(role: DelegateRole, task: string): Promise<string>;
@@ -218,6 +219,36 @@ async function ensureFresh(ctx: ToolContext, file: string, shown: string, conten
   }
 }
 
+const TEST_FILE = /(^|\/)(tests?|__tests__|specs?)\/|(^|\/)test[^/]*\.[cm]?[jt]sx?$|\.(test|spec)\.[cm]?[jt]sx?$|(^|\/)test_[^/]*\.py$|_test\.(py|go)$/;
+const ASSERTION = /\bassert|\bexpect\s*\(|\.should\b|\.to(Be|Equal|Throw)\b/;
+const LITERALS = /(['"`])(?:\\.|(?!\1).)*\1|\b\d+(?:\.\d+)?\b/g;
+const SKIPS = /process\.exit\s*\(\s*0?\s*\)|\.skip\s*\(|\bx(it|describe|test)\s*\(|SkipTest|pytest\.skip|unittest\.skip|@skip\b/;
+const TEST_REQUEST =
+  /\b(escrev|cri|adicion|inclu|atualiz|alter|corrij|ajust|mud|refator|renome|remov|apag|reescrev|add|writ|creat|updat|chang|fix|renam|remov|delet|rewrit|edit)\w*\s+(?:\S+\s+){0,3}?(test|teste|spec)/i;
+
+export const allowsTestEdits = (task: string): boolean => TEST_REQUEST.test(task);
+
+const signature = (line: string): string => (line.match(LITERALS) ?? []).join('|');
+
+function testGuard(shown: string, before: string | null, after: string, ctx: ToolContext): string | null {
+  if (ctx.testEditsAllowed || !TEST_FILE.test(shown)) return null;
+  const afterLines = after.split('\n').map((l) => l.trim());
+  const kept = new Set(afterLines);
+  const keptSignatures = new Set(afterLines.filter((l) => ASSERTION.test(l)).map(signature));
+  const changed = (before ?? '')
+    .split('\n')
+    .map((l) => l.trim())
+    .find((l) => ASSERTION.test(l) && !kept.has(l) && !keptSignatures.has(signature(l)));
+  const conflict = 'If an existing test contradicts the request, do not change it: implement what the request says and call report_conflict with the evidence.';
+  if (changed) {
+    return `Change NOT applied: ${shown} is a test file and this edit changes or removes the existing assertion "${changed}". The request does not ask to change tests, so existing assertions are read-only (you may add new tests). ${conflict}`;
+  }
+  const beforeLines = new Set((before ?? '').split('\n').map((l) => l.trim()));
+  const skip = afterLines.find((l) => SKIPS.test(l) && !beforeLines.has(l));
+  if (skip) return `Change NOT applied: "${skip}" would skip or short-circuit tests in ${shown}. ${conflict}`;
+  return null;
+}
+
 const NUMBERED = /^(\d+)[-_]/;
 
 async function numberingWarning(file: string): Promise<string> {
@@ -366,6 +397,8 @@ export const allTools: Tool[] = [
       if (before !== null) await ensureFresh(ctx, file, shown, before, 'call write_file again with the full new content');
       const crlf = before !== null && before.includes('\r\n');
       const content = crlf ? str(i, 'content').replace(/\r?\n/g, '\r\n') : str(i, 'content');
+      const blocked = testGuard(shown, before, content, ctx);
+      if (blocked) throw new Error(blocked);
       const warning = await guardedWrite(ctx, file, shown, before, content);
       const numbering = before === null ? await numberingWarning(file) : '';
       return `${before === null ? 'Created' : 'Rewrote'} ${shown} (${str(i, 'content').split('\n').length} lines).${warning}${numbering}`;
@@ -398,6 +431,8 @@ export const allTools: Tool[] = [
         throw await showCurrent(ctx, file, before, `old_string does not match ${shown} exactly and you have not read this file yet.`, 'call edit_file again with old_string copied from it');
       }
       if (!result.ok) throw new Error(result.error);
+      const blocked = testGuard(shown, before, result.content, ctx);
+      if (blocked) throw new Error(blocked);
       const warning = await guardedWrite(ctx, file, shown, before, result.content);
       const how = result.strategy === 'exact' ? '' : ` (matched ${result.strategy})`;
       const count = result.count > 1 ? `${result.count} replacements` : '1 replacement';
@@ -536,6 +571,23 @@ export const allTools: Tool[] = [
       const quoted = `'${str(i, 'code').replace(/'/g, `'\\''`)}'`;
       const seconds = Math.min(600, Math.max(1, num(i, 'timeout_seconds', 60)));
       return runBash(`${str(i, 'language') === 'python' ? 'python3 -c' : 'node --input-type=module -e'} ${quoted}`, ctx, seconds * 1000);
+    },
+  },
+  {
+    name: 'report_conflict',
+    readOnly: true,
+    description:
+      'Stop and report to the user that the request cannot be done as asked: a test, spec or existing behavior contradicts the request, or it needs changes the request rules out. Use it instead of working around the conflict (never edit tests to make them pass, never special-case inputs or hard-code expected values). Do what the request asks first, then report. Your explanation becomes the final answer: say what you did, the exact evidence (file:line, expected vs. requested) and what the user can decide.',
+    schema: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', enum: ['test_contradicts_request', 'out_of_scope', 'impossible'] },
+        explanation: { type: 'string', description: 'Final answer for the user, in their language' },
+      },
+      required: ['kind', 'explanation'],
+    },
+    async run(i) {
+      return str(i, 'explanation');
     },
   },
   {

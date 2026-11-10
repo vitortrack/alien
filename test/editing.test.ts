@@ -63,6 +63,7 @@ function context(root: string): ToolContext {
     memory: undefined as never,
     files: new Map(),
     allowed: new Set(),
+    testEditsAllowed: true,
     confirm: async () => 'yes',
     setPlan: () => undefined,
     delegate: async () => '',
@@ -135,4 +136,24 @@ test('creating a numbered file whose number is taken warns with the next free nu
   assert.match(clash, /number 002 is already used by 002-vehicles\.sql in this directory; the next free number is 003/);
   assert.doesNotMatch(await tool('write_file').run({ path: 'db/init/003_ok.sql', content: '' }, ctx), /Warning/);
   assert.doesNotMatch(await tool('write_file').run({ path: 'src/a.js', content: 'export {};\n' }, ctx), /Warning/);
+});
+
+test('test guard: existing assertions are read-only unless the request asks to change tests; renames and new tests pass', async () => {
+  const { allowsTestEdits } = await import('../src/tools.js');
+  assert.equal(allowsTestEdits('Inclua testes em test.mjs'), true);
+  assert.equal(allowsTestEdits('Corrija o teste quebrado'), true);
+  assert.equal(allowsTestEdits('Depois rode npm test e garanta que passe.'), false);
+  assert.equal(allowsTestEdits('Os testes em test_slug.py precisam passar.'), false);
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-guard-'));
+  const test = "import assert from 'node:assert/strict';\nassert.equal(calcTotal([1, 2]), 3);\nassert.equal(discount(100, 10), 85);\n";
+  fs.writeFileSync(path.join(root, 'test.mjs'), test);
+  const ctx = { ...context(root), testEditsAllowed: false };
+  await tool('read_file').run({ path: 'test.mjs' }, ctx);
+  await assert.rejects(tool('edit_file').run({ path: 'test.mjs', old_string: '85);', new_string: '90);' }, ctx), /changes or removes the existing assertion "assert\.equal\(discount\(100, 10\), 85\);"[\s\S]*report_conflict/);
+  await assert.rejects(tool('write_file').run({ path: 'test.mjs', content: "import assert from 'node:assert/strict';\nassert.equal(calcTotal([1, 2]), 3);\n" }, ctx), /changes or removes/);
+  await assert.rejects(tool('edit_file').run({ path: 'test.mjs', old_string: "'node:assert/strict';\n", new_string: "'node:assert/strict';\nprocess.exit(0);\n" }, ctx), /would skip or short-circuit/);
+  assert.match(await tool('edit_file').run({ path: 'test.mjs', old_string: 'calcTotal([1, 2])', new_string: 'computeTotal([1, 2])' }, ctx), /Edited test\.mjs/);
+  assert.match(await tool('edit_file').run({ path: 'test.mjs', old_string: '85);\n', new_string: '85);\nassert.equal(discount(50, 50), 25);\n' }, ctx), /Edited test\.mjs/);
+  assert.match(await tool('edit_file').run({ path: 'test.mjs', old_string: '85);\n', new_string: '90);\n' }, { ...ctx, testEditsAllowed: true }), /Edited test\.mjs/);
 });

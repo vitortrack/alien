@@ -7,7 +7,7 @@ import type { AgentUI } from './agent-ui.js';
 import { validateInput } from './validate.js';
 import { isReadOnlyCommand } from './shell.js';
 
-const researchOnly = (t: Tool): boolean => t.readOnly && !['delegate', 'update_plan', 'remember'].includes(t.name);
+const researchOnly = (t: Tool): boolean => t.readOnly && !['delegate', 'update_plan', 'remember', 'report_conflict'].includes(t.name);
 
 const ROLE_TOOLS: Record<Role, (t: Tool) => boolean> = {
   main: () => true,
@@ -71,7 +71,7 @@ export class Agent {
 
   async run(task: string): Promise<string> {
     const { cfg } = this.session;
-    const ctx = this.session.context(this.ui, this.files);
+    const ctx = this.session.context(this.ui, this.files, task);
     this.changed = false;
     this.callCounts.clear();
     this.reads.clear();
@@ -152,6 +152,12 @@ export class Agent {
 
         const before = this.mutations;
         const results = await this.execute(r.toolCalls, ctx);
+        const conflict = results.find((x) => x.name === 'report_conflict' && !x.isError);
+        if (conflict) {
+          this.session.log({ agent: this.role, event: 'conflict', text: conflict.output });
+          this.ui.warn('o agente sinalizou um conflito com o pedido');
+          return conflict.output;
+        }
         failures = results.every((x) => x.isError) ? failures + 1 : 0;
         idle = this.mutations > before ? 0 : idle + 1;
         const last = results[results.length - 1]!;
@@ -212,6 +218,9 @@ export class Agent {
     }
     if (seen > MAX_IDENTICAL_CALLS) {
       return finish(`Loop guard: you already made this exact call ${seen - 1} times and have its result above. Use what you have or try something different.`, true);
+    }
+    if (c.name === 'report_conflict' && c.input.kind === 'test_contradicts_request' && (this.touched.size === 0 || !this.verifiedSinceEdit)) {
+      return finish('Not reported yet: first implement what the request asks (edit the code), then run the tests after your last edit, so the explanation quotes real output. Then call report_conflict again.', true);
     }
     try {
       if (ctx.signal.aborted) return finish('Interrupted by the user.', true);
