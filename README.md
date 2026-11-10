@@ -17,7 +17,7 @@ Causa raiz: o laço começa em i = 1 e pula o primeiro item…
 
 ## Instalação
 
-Requer Node.js 22+ (e `python3`, se quiser `run_code` em Python).
+Requer Node.js 22+.
 
 ```bash
 npm install
@@ -61,7 +61,7 @@ trackai -p anthropic --effort xhigh "investigue o vazamento de memória"
 |---|---|
 | `-p, --provider ollama\|anthropic` | provedor do modelo |
 | `-m, --model <nome>` | modelo (`glm-5.3-flash:cloud`, `qwen3:8b`, `claude-opus-5-5`, …) |
-| `--mode ask\|auto\|read-only` | `ask` pede confirmação para escrita, `bash` e `run_code`; `auto` só confirma comandos destrutivos; `read-only` bloqueia tudo que altera |
+| `--mode ask\|auto\|read-only` | `ask` pede confirmação para escrita e `bash` (comandos só de leitura, como `ls`, `grep` e `find`, passam direto); `auto` só confirma comandos destrutivos; `read-only` bloqueia tudo que altera |
 | `-C, --cwd <dir>` | pasta de trabalho (o agente não acessa arquivos fora dela) |
 | `--orchestrate` | pipeline planner → workers → revisor |
 | `--review` | liga a revisão por um agente crítico (padrão: desligada; medido: mesmo acerto e 19–38% menos tokens sem ela, com a checagem de escopo e o portão de verificação sempre ativos) |
@@ -120,9 +120,9 @@ A saída é Markdown renderizado no terminal (títulos, listas, negrito, blocos 
 | Componente | Como está implementado | Onde |
 |---|---|---|
 | **1. Núcleo cognitivo** | Persona de engenheiro sênior, método de resolução (evidência → causa raiz → decisão → verificação → reflexão → aprendizado), guardrails (escopo, segredos, ações destrutivas) e um prompt por papel (main, worker, explorer, planner, critic). Instruções do projeto em `TRACKAI.md`, `AGENTS.md` ou `CLAUDE.md` são carregadas automaticamente. | `src/prompts.ts` |
-| **2. Memória** | **Curto prazo:** histórico da sessão, com compactação automática (resumo) quando a janela do modelo enche. **Longo prazo:** banco vetorial em `.trackai/memory.jsonl` com *fatos*, *lições* e *episódios*; as lembranças relevantes são recuperadas no início de cada tarefa, os episódios são gravados ao concluir e o agente grava fatos e lições com `remember`. | `src/memory.ts`, `src/providers/ollama.ts` |
-| **3. Planejamento** | Laço ReAct; `update_plan` (decomposição em subobjetivos); planner dedicado no modo `--orchestrate`; autocorreção (o erro volta como observação estruturada, e após 3 falhas seguidas o agente é instruído a mudar de estratégia); antes de concluir, **portão de verificação** (se mexeu em código e não rodou nada depois da última edição, pede uma vez para rodar testes/build) e **checagem de escopo** (áreas do diff que o pedido não menciona); revisor independente opcional (`--review`). | `src/agent.ts`, `src/orchestrator.ts` |
-| **4. Ferramentas** | `read_file`, `write_file`, `edit_file`, `list_dir`, `glob`, `grep`, `semantic_search` (RAG), `bash`, `run_code` (Python/Node), `web_fetch`, `update_plan`, `delegate`, `remember`, `recall`, `report_conflict` (encerra a tarefa relatando que um teste ou o código contradiz o pedido, em vez de contornar; só aceito depois de editar e rodar algo). Entradas validadas contra o schema; caminhos presos ao workspace (inclusive via symlink); permissões por modo; detecção de comandos destrutivos. | `src/tools.ts`, `src/validate.ts` |
+| **2. Memória** | **Curto prazo:** histórico da sessão, com compactação automática (resumo) quando a janela do modelo enche. **Longo prazo:** banco vetorial em `.trackai/memory.jsonl` com *fatos*, *lições* e *episódios*; as lembranças relevantes são recuperadas no início de cada tarefa, os episódios são gravados automaticamente ao concluir e o agente consulta a memória com `recall`. | `src/memory.ts`, `src/providers/ollama.ts` |
+| **3. Planejamento** | Laço ReAct; planner dedicado no modo `--orchestrate`; autocorreção (o erro volta como observação estruturada, e após 3 falhas seguidas o agente é instruído a mudar de estratégia); antes de concluir, **portão de verificação** (se mexeu em código e não rodou nada depois da última edição, pede uma vez para rodar testes/build) e **checagem de escopo** (áreas do diff que o pedido não menciona); revisor independente opcional (`--review`). | `src/agent.ts`, `src/orchestrator.ts` |
+| **4. Ferramentas** | Agente principal: `bash`, `read_file`, `write_file`, `edit_file`, `semantic_search` (RAG), `web_fetch`, `delegate`, `recall`, `report_conflict` (encerra a tarefa relatando que um teste ou o código contradiz o pedido, em vez de contornar; só aceito depois de editar e rodar algo). Entradas validadas contra o schema; caminhos presos ao workspace (inclusive via symlink); permissões por modo; detecção de comandos destrutivos. Listar, buscar e rodar código ficam com o `bash`: na avaliação, as ferramentas dedicadas (`list_dir`, `glob`, `grep`, `run_code`, `update_plan`, `remember`) custavam ~40% mais passos e tokens sem ganho de acerto; os subagentes de pesquisa, que não têm `bash`, continuam com `list_dir`, `glob` e `grep`. | `src/tools.ts`, `src/validate.ts` |
 | **5. Observabilidade** | Trace de cada passo (texto do modelo, chamadas, resultados, tokens e custo) em `~/.trackai/sessions/*.jsonl`; contagem de tokens e custo estimado ao fim de cada tarefa; travas contra loop (limite de passos, chamada idêntica repetida, orçamento de tokens) e Ctrl+C para interromper. | `src/session.ts`, `src/agent.ts` |
 
 **Multiagente.** O agente principal age como gerente: delega pesquisa ampla a *explorers* (somente leitura, rodam em paralelo) e subtarefas independentes a *workers*, e cada sub-agente começa com contexto limpo. No `--orchestrate`, o pipeline é fixo: planner → um worker por passo → revisor → correções.
@@ -152,7 +152,7 @@ npm run eval -- --model qwen3:8b                     # compara outro modelo
 npm run eval:retrieval                               # benchmark do RAG sobre ../detrorjweb
 ```
 
-17 cenários com testes escondidos (bugs, feature, refatoração, diff, CRLF/tabs, blocos duplicados, Python, escopo, perguntas). A suíte `impossible` (fora de `all`) traz um teste visível que contradiz o pedido e mede se o agente trapaceia ou relata o conflito. Mede acerto, passos, tokens, tempo, falhas de ferramenta e inglês na prosa; resultados em `eval/results/`.
+17 cenários com testes escondidos (bugs, feature, refatoração, diff, CRLF/tabs, blocos duplicados, Python, escopo, perguntas). A suíte `long` (fora de `all`) tem tarefas de várias partes com checagens escondidas, onde o modelo ainda erra; a suíte `impossible` (também fora de `all`) traz um teste visível que contradiz o pedido e mede se o agente trapaceia ou relata o conflito. Mede acerto, passos, tokens, tempo, falhas de ferramenta e inglês na prosa; resultados em `eval/results/`.
 
 ## Desenvolvimento
 

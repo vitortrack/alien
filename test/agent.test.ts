@@ -129,10 +129,10 @@ test('read-only mode denies writes and the loop guard stops identical repeated c
   const root = workspace();
   const provider = new ScriptedProvider([
     () => call('write_file', { path: 'x.txt', content: 'no' }),
-    () => call('list_dir', {}),
-    () => call('list_dir', {}),
-    () => call('list_dir', {}),
-    () => call('list_dir', {}),
+    () => call('bash', { command: 'ls' }),
+    () => call('bash', { command: 'ls' }),
+    () => call('bash', { command: 'ls' }),
+    () => call('bash', { command: 'ls' }),
     () => answer('ok'),
   ]);
   const ui = UI.create();
@@ -146,7 +146,7 @@ test('read-only mode denies writes and the loop guard stops identical repeated c
 
 test('step limit and token budget stop the agent', async () => {
   const root = workspace();
-  const loop = new ScriptedProvider(Array.from({ length: 20 }, (_, k) => () => call('list_dir', { path: `.${'/.'.repeat(k)}` })));
+  const loop = new ScriptedProvider(Array.from({ length: 20 }, (_, k) => () => call('bash', { command: `ls .${'/.'.repeat(k)}` })));
   const ui = UI.create();
   const limited = new Session(config(root, { maxSteps: 3 }), ui, () => loop);
   assert.match(await limited.run('loop'), /Limite de 3 passos/);
@@ -360,6 +360,20 @@ test('report_conflict ends the task with the explanation, but only after an edit
     ]);
     const out = await new Session(config(root, { review: true, mode: 'auto' }), ui, () => provider).run('implemente d');
     assert.equal(out, 'Implementei 10% de 100 = 90; test.mjs:3 espera 85 e contradiz o pedido.');
+  } finally {
+    ui.close();
+  }
+});
+
+test('the main agent has no tools that bash covers', async () => {
+  const root = workspace();
+  const ui = UI.create();
+  try {
+    const provider = new ScriptedProvider([() => call('update_plan', { steps: [] }), () => answer('ok')]);
+    await new Session(config(root), ui, () => provider).run('x');
+    const out = provider.results[0]![0]!.output;
+    assert.match(out, /^Unknown tool "update_plan"\. Available tools: .*\bbash\b/);
+    for (const gone of ['remember', 'run_code', 'list_dir', 'glob', 'grep']) assert.doesNotMatch(out, new RegExp(`\\b${gone}\\b`));
   } finally {
     ui.close();
   }

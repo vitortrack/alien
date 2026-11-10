@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { hardScenarios, impossibleScenarios, realScenarios, scenarios } from './scenarios.js';
+import { hardScenarios, impossibleScenarios, longScenarios, realScenarios, scenarios } from './scenarios.js';
 
 type Reference = { files?: Record<string, (old: string) => string>; answer: string };
 
@@ -95,10 +95,41 @@ const references: Record<string, Reference> = {
     files: { 'src/config.js': (s) => s.replace('export const MAX_RETRIES_HTTP = 3;', 'export const HTTP_MAX_RETRIES = 5;').replace('retries: MAX_RETRIES_HTTP', 'retries: HTTP_MAX_RETRIES') },
     answer: '',
   },
+  'long-cancel-order': {
+    files: {
+      'src/orders/status.js': (s) => s.replace("pending: ['paid'],\n  paid: ['shipped'],", "pending: ['paid', 'cancelled'],\n  paid: ['shipped', 'cancelled'],").replace('delivered: [],', 'delivered: [],\n  cancelled: [],'),
+      'src/orders/service.js': (s) =>
+        `import { notify } from '../notify.js';\nimport { payments } from '../payments.js';\n${s}\nexport function cancel(id, reason) {\n  const order = store.get(id);\n  const wasPaid = order.status === 'paid';\n  transition(order, 'cancelled');\n  order.cancelReason = reason;\n  if (wasPaid) payments.refund(order.id, order.totalCents);\n  notify(order.customer, 'Seu pedido ' + order.id + ' foi cancelado.');\n  return order;\n}\n`,
+      'src/api/routes.js': (s) =>
+        s
+          .replace('import { pay, placeOrder, ship }', 'import { cancel, pay, placeOrder, ship }')
+          .replace(
+            "  'POST /orders/:id/ship':",
+            "  'POST /orders/:id/cancel': (req) => validate({ reason: 'motivo' }, req.body) ?? { status: 200, body: cancel(Number(req.params.id), req.body.reason) },\n  'POST /orders/:id/ship':",
+          ),
+      'src/reports/daily.js': (s) =>
+        s
+          .replace("o.status !== 'pending'", "!['pending', 'cancelled'].includes(o.status)")
+          .replace('return { orders: orders.length, revenueCents };', "return { orders: orders.length, revenueCents, cancelled: orders.filter((o) => o.status === 'cancelled').length };"),
+    },
+    answer: '',
+  },
+  'long-report-bugs': {
+    files: {
+      'src/fetch.js': (s) => s.replace('    if (batch.length < size) break;\n    out.push(...batch);', '    out.push(...batch);\n    if (batch.length < size) break;'),
+      'src/status.js': (s) => s.replace("['done']", "['done', 'finished']"),
+      'src/report.js': (s) =>
+        s
+          .replace("import { dayKey } from './time.js';", "import { panelMinutes } from './panel.js';\nimport { dayKey } from './time.js';")
+          .replace('minutes: trips.reduce((sum, t) => sum + Math.round(t.durationMs / 60000), 0)', 'minutes: panelMinutes(trips)'),
+      'src/time.js': () => "export const dayKey = (iso) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date(iso));\n",
+    },
+    answer: '',
+  },
 };
 
 let ok = true;
-for (const s of [...scenarios, ...hardScenarios, ...realScenarios, ...impossibleScenarios]) {
+for (const s of [...scenarios, ...hardScenarios, ...realScenarios, ...impossibleScenarios, ...longScenarios]) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `trackai-sanity-${s.id}-`));
   for (const [file, content] of Object.entries({ ...s.files, ...(s.uncommitted ?? {}) })) {
     fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });

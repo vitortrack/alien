@@ -933,3 +933,240 @@ if __name__ == "__main__":
       }),
   },
 ];
+
+function ordersApp(): Record<string, string> {
+  return {
+    'package.json': PKG,
+    'AGENTS.md': String.raw`# Convenções
+- Toda mudança de status de pedido passa por transition(order, to) em src/orders/status.js, que valida a transição e registra no audit. Nunca atribua order.status direto.
+- Mensagens de erro para o usuário em pt-BR, dizendo o que fazer.
+- Toda rota que recebe body valida os campos obrigatórios com validate() de src/api/validate.js, que já monta a resposta 400 padrão. Não escreva validação de campo à mão.
+- Valores em centavos (inteiros).
+`,
+    'src/audit.js': String.raw`const entries = [];
+export const audit = {
+  record: (type, data) => entries.push({ type, ...data, seq: entries.length + 1 }),
+  list: () => [...entries],
+};
+`,
+    'src/orders/status.js': String.raw`import { audit } from '../audit.js';
+
+export const TRANSITIONS = {
+  pending: ['paid'],
+  paid: ['shipped'],
+  shipped: ['delivered'],
+  delivered: [],
+};
+
+export function transition(order, to) {
+  if (!TRANSITIONS[order.status]?.includes(to)) throw new Error('Não é possível mudar o pedido de ' + order.status + ' para ' + to + '.');
+  audit.record('status', { orderId: order.id, from: order.status, to });
+  order.status = to;
+  return order;
+}
+`,
+    'src/orders/store.js': String.raw`const orders = new Map();
+let next = 1;
+
+export const store = {
+  create: (data) => {
+    const order = { id: next++, status: 'pending', ...data };
+    orders.set(order.id, order);
+    return order;
+  },
+  get: (id) => orders.get(id),
+  all: () => [...orders.values()],
+};
+`,
+    'src/orders/service.js': String.raw`import { store } from './store.js';
+import { transition } from './status.js';
+
+export function placeOrder(customer, items) {
+  const totalCents = items.reduce((sum, i) => sum + i.priceCents * i.qty, 0);
+  return store.create({ customer, items, totalCents });
+}
+
+export const pay = (id) => transition(store.get(id), 'paid');
+export const ship = (id) => transition(store.get(id), 'shipped');
+`,
+    'src/payments.js': String.raw`const refunds = [];
+
+export const payments = {
+  refund: (orderId, cents) => refunds.push({ orderId, cents }),
+  refunds: () => [...refunds],
+};
+`,
+    'src/notify.js': String.raw`const sent = [];
+
+export const notify = (to, message) => sent.push({ to, message });
+export const outbox = () => [...sent];
+`,
+    'src/api/validate.js': String.raw`export function validate(required, body) {
+  const missing = Object.entries(required)
+    .filter(([field]) => body?.[field] === undefined || body[field] === null || String(body[field]).trim() === '')
+    .map(([, label]) => label);
+  return missing.length ? { status: 400, body: { error: 'Preencha: ' + missing.join(', ') + '.' } } : null;
+}
+`,
+    'src/api/routes.js': String.raw`import { pay, placeOrder, ship } from '../orders/service.js';
+import { validate } from './validate.js';
+
+export const routes = {
+  'POST /orders': (req) => validate({ customer: 'cliente', items: 'itens' }, req.body) ?? { status: 201, body: placeOrder(req.body.customer, req.body.items) },
+  'POST /orders/:id/pay': (req) => ({ status: 200, body: pay(Number(req.params.id)) }),
+  'POST /orders/:id/ship': (req) => ({ status: 200, body: ship(Number(req.params.id)) }),
+};
+
+export function handle(method, url, body = {}) {
+  for (const [key, fn] of Object.entries(routes)) {
+    const [m, pattern] = key.split(' ');
+    const re = new RegExp('^' + pattern.replace(/:(\w+)/g, '(?<$1>[^/]+)') + '$');
+    const match = m === method && re.exec(url);
+    if (!match) continue;
+    try {
+      return fn({ params: match.groups ?? {}, body });
+    } catch (e) {
+      return { status: 422, body: { error: e.message } };
+    }
+  }
+  return { status: 404, body: { error: 'Rota não encontrada.' } };
+}
+`,
+    'src/reports/daily.js': String.raw`import { store } from '../orders/store.js';
+
+export function dailyReport() {
+  const orders = store.all();
+  const revenueCents = orders.filter((o) => o.status !== 'pending').reduce((sum, o) => sum + o.totalCents, 0);
+  return { orders: orders.length, revenueCents };
+}
+`,
+    'test.mjs': String.raw`import assert from 'node:assert/strict';
+import { handle } from './src/api/routes.js';
+import { dailyReport } from './src/reports/daily.js';
+
+const order = handle('POST', '/orders', { customer: 'bia@x.com', items: [{ priceCents: 500, qty: 3 }] }).body;
+assert.equal(order.totalCents, 1500);
+assert.equal(handle('POST', '/orders/' + order.id + '/pay').status, 200);
+assert.equal(handle('POST', '/orders/' + order.id + '/pay').status, 422);
+assert.deepEqual(handle('POST', '/orders', { items: [{ priceCents: 100, qty: 1 }] }), { status: 400, body: { error: 'Preencha: cliente.' } });
+assert.equal(dailyReport().revenueCents, 1500);
+console.log('ok');
+`,
+  };
+}
+
+function tripsReportApp(): Record<string, string> {
+  return {
+    'package.json': PKG,
+    'AGENTS.md': '# Convenções\n- As datas chegam em UTC (ISO 8601). Relatórios por dia usam o dia no horário de Brasília (America/Sao_Paulo).\n',
+    'src/db.js': 'export const pager = (rows) => async (page, size) => rows.slice((page - 1) * size, page * size);\n',
+    'src/fetch.js': String.raw`export async function allTrips(fetchPage, size = 50) {
+  const out = [];
+  for (let page = 1; ; page++) {
+    const batch = await fetchPage(page, size);
+    if (batch.length < size) break;
+    out.push(...batch);
+  }
+  return out;
+}
+`,
+    'src/time.js': 'export const dayKey = (iso) => iso.slice(0, 10);\n',
+    'src/status.js': "export const FINISHED = ['done'];\n",
+    'src/panel.js': 'export const panelMinutes = (trips) => Math.round(trips.reduce((sum, t) => sum + t.durationMs, 0) / 60000);\n',
+    'src/trips/open.js': "export const openTrip = (id, vehicle, startedAt) => ({ id, vehicle, startedAt, status: 'running' });\n",
+    'src/trips/close.js': String.raw`export function closeTrip(trip, endedAt) {
+  return { ...trip, status: 'finished', durationMs: Date.parse(endedAt) - Date.parse(trip.startedAt) };
+}
+`,
+    'src/report.js': String.raw`import { allTrips } from './fetch.js';
+import { FINISHED } from './status.js';
+import { dayKey } from './time.js';
+
+export async function dailyReport(fetchPage, day) {
+  const trips = (await allTrips(fetchPage)).filter((t) => FINISHED.includes(t.status) && dayKey(t.startedAt) === day);
+  return { trips: trips.length, minutes: trips.reduce((sum, t) => sum + Math.round(t.durationMs / 60000), 0) };
+}
+`,
+    'test.mjs': String.raw`import assert from 'node:assert/strict';
+import { pager } from './src/db.js';
+import { dailyReport } from './src/report.js';
+
+const rows = Array.from({ length: 51 }, (_, i) => ({ id: i + 1, status: 'done', startedAt: '2026-03-10T15:00:00Z', durationMs: 600000 }));
+assert.deepEqual(await dailyReport(pager(rows), '2026-03-10'), { trips: 51, minutes: 510 });
+console.log('ok');
+`,
+  };
+}
+
+export const longScenarios: Scenario[] = [
+  {
+    id: 'long-cancel-order',
+    kind: 'feature',
+    files: ordersApp(),
+    task: 'Precisamos permitir cancelar pedidos. Crie a rota POST /orders/:id/cancel recebendo { reason }. Pedido pendente ou pago pode ser cancelado; enviado ou entregue não. O motivo é obrigatório: sem ele, responda 400 com uma mensagem que diga o que fazer. Se o pedido já estava pago, registre o reembolso do valor total. Avise o cliente pelo notify quando o pedido for cancelado. O relatório diário deve mostrar quantos pedidos foram cancelados, e a receita não pode contar pedidos cancelados.',
+    check: (dir) =>
+      runNode(
+        dir,
+        String.raw`import assert from 'node:assert/strict';
+import { handle } from './src/api/routes.js';
+import { store } from './src/orders/store.js';
+import { audit } from './src/audit.js';
+import { payments } from './src/payments.js';
+import { outbox } from './src/notify.js';
+import { dailyReport } from './src/reports/daily.js';
+const items = [{ priceCents: 1000, qty: 2 }];
+const mk = () => handle('POST', '/orders', { customer: 'ana@x.com', items }).body;
+const url = (o, action) => '/orders/' + o.id + '/' + action;
+const a = mk();
+const b = mk(); handle('POST', url(b, 'pay'));
+const c = mk(); handle('POST', url(c, 'pay')); handle('POST', url(c, 'ship'));
+const d = mk(); handle('POST', url(d, 'pay'));
+const noReason = handle('POST', url(a, 'cancel'), {});
+assert.equal(noReason.status, 400, 'missing reason must answer 400, got ' + JSON.stringify(noReason));
+assert.match(String(noReason.body?.error), /^Preencha: .*(motivo|reason)/i, 'the 400 must come from validate() (AGENTS.md), got ' + JSON.stringify(noReason.body));
+assert.ok(!/cancel/i.test(store.get(a.id).status), 'order without reason must not be cancelled');
+const ra = handle('POST', url(a, 'cancel'), { reason: 'desisti' });
+assert.equal(ra.status, 200, 'cancel pending: ' + JSON.stringify(ra));
+assert.match(store.get(a.id).status, /^cancell?ed$/);
+const rb = handle('POST', url(b, 'cancel'), { reason: 'atraso' });
+assert.equal(rb.status, 200, 'cancel paid: ' + JSON.stringify(rb));
+const rc = handle('POST', url(c, 'cancel'), { reason: 'x' });
+assert.ok(rc.status >= 400 && rc.status < 500, 'shipped order must not be cancellable, got ' + rc.status);
+assert.equal(store.get(c.id).status, 'shipped');
+assert.deepEqual(payments.refunds().map((r) => [r.orderId, r.cents]), [[b.id, 2000]], 'refund only the paid order, full value');
+assert.ok([a, b].every((o) => audit.list().some((e) => e.orderId === o.id && /cancel/.test(e.to))), 'cancellation must go through transition() so it is audited');
+assert.equal(outbox().filter((m) => m.to === 'ana@x.com').length, 2, 'notify the customer once per cancelled order');
+const rep = dailyReport();
+const key = Object.keys(rep).find((k) => /cancel/i.test(k));
+assert.ok(key, 'daily report must show cancelled orders');
+assert.equal(Array.isArray(rep[key]) ? rep[key].length : rep[key], 2, 'two cancelled orders');
+assert.equal(rep.revenueCents, 4000, 'revenue counts only paid/shipped orders, not cancelled');`,
+      ),
+  },
+  {
+    id: 'long-report-bugs',
+    kind: 'bug',
+    files: tripsReportApp(),
+    task: 'O relatório diário de viagens (dailyReport em src/report.js) está errado em produção: faltam viagens e o total de minutos do dia não bate com o painel. O test.mjs reproduz um dos casos. Encontre e corrija todas as causas.',
+    check: (dir) =>
+      runNode(
+        dir,
+        String.raw`import assert from 'node:assert/strict';
+import { pager } from './src/db.js';
+import { dailyReport } from './src/report.js';
+import { closeTrip } from './src/trips/close.js';
+const t = (id, startedAt, status = 'done', min = 10) => ({ id, status, startedAt, durationMs: min * 60000 });
+const hundred = Array.from({ length: 100 }, (_, i) => t(i + 1, '2026-03-10T15:00:00Z'));
+assert.deepEqual(await dailyReport(pager(hundred), '2026-03-10'), { trips: 100, minutes: 1000 }, 'exact multiple of the page size');
+const partial = Array.from({ length: 73 }, (_, i) => t(i + 1, '2026-03-10T15:00:00Z'));
+assert.deepEqual(await dailyReport(pager(partial), '2026-03-10'), { trips: 73, minutes: 730 }, 'last partial page must count');
+const fresh = closeTrip({ id: 7, startedAt: '2026-03-10T12:00:00Z' }, '2026-03-10T12:30:00Z');
+assert.deepEqual(await dailyReport(pager([t(1, '2026-03-10T12:00:00Z'), fresh]), '2026-03-10'), { trips: 2, minutes: 40 }, 'trips closed by closeTrip must count');
+const late = [t(1, '2026-03-10T01:30:00Z'), t(2, '2026-03-10T03:30:00Z'), t(3, '2026-03-11T02:59:00Z')];
+assert.deepEqual(await dailyReport(pager(late), '2026-03-10'), { trips: 2, minutes: 20 }, 'the day must be the Sao Paulo local day');
+assert.deepEqual(await dailyReport(pager(late), '2026-03-09'), { trips: 1, minutes: 10 }, 'the day must be the Sao Paulo local day');
+const odd = [1, 2, 3].map((id) => ({ ...t(id, '2026-03-10T15:00:00Z'), durationMs: 624000 }));
+assert.deepEqual(await dailyReport(pager(odd), '2026-03-10'), { trips: 3, minutes: 31 }, 'minutes must match the panel (round the total, not each trip)');`,
+      ),
+  },
+];

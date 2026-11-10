@@ -577,7 +577,7 @@ export const allTools: Tool[] = [
     name: 'report_conflict',
     readOnly: true,
     description:
-      'Stop and report to the user that the request cannot be done as asked: a test, spec or existing behavior contradicts the request, or it needs changes the request rules out. Use it instead of working around the conflict (never edit tests to make them pass, never special-case inputs or hard-code expected values). Do what the request asks first, then report. Your explanation becomes the final answer: say what you did, the exact evidence (file:line, expected vs. requested) and what the user can decide.',
+      'Stop and report to the user that the request cannot be done as asked: a test, spec or existing behavior contradicts the request, or it needs changes the request rules out. Use it instead of working around the conflict (never edit tests to make them pass, never special-case inputs or hard-code expected values). Do what the request asks first, then report. Never use it to deliver a normal final answer: when the task is done without a conflict, just answer in text. Your explanation becomes the final answer: say what you did, the exact evidence (file:line, expected vs. requested) and what the user can decide.',
     schema: {
       type: 'object',
       properties: {

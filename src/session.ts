@@ -36,6 +36,7 @@ export interface Config {
   lang: string;
   interactive?: boolean;
   logDir: string | null;
+  tools?: string[];
 }
 
 const PRICE_PER_MTOK: Record<string, [number, number]> = {

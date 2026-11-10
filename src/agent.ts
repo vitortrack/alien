@@ -9,8 +9,10 @@ import { isReadOnlyCommand } from './shell.js';
 
 const researchOnly = (t: Tool): boolean => t.readOnly && !['delegate', 'update_plan', 'remember', 'report_conflict'].includes(t.name);
 
+const BASH_COVERS = ['update_plan', 'remember', 'run_code', 'list_dir', 'glob', 'grep'];
+
 const ROLE_TOOLS: Record<Role, (t: Tool) => boolean> = {
-  main: () => true,
+  main: (t) => !BASH_COVERS.includes(t.name),
   worker: (t) => t.name !== 'delegate',
   explorer: researchOnly,
   planner: researchOnly,
@@ -28,7 +30,7 @@ const MAX_SCOPE_CHECKS = 2;
 const EDIT_LOOP_AT = 5;
 const EDIT_LOOP_EVERY = 3;
 const VERIFY_NUDGE =
-  '[verification] You changed code but have not run anything since your last edit. Before your final answer, run the tests, build or type-check that cover the change (or execute the changed code with run_code) and read the whole output; fix what fails. If nothing in this project can be run, say so explicitly in the final answer.';
+  '[verification] You changed code but have not run anything since your last edit. Before your final answer, run the tests, build or type-check that cover the change (or execute the changed code) and read the whole output; fix what fails. If nothing in this project can be run, say so explicitly in the final answer.';
 const isDocFile = (f: string): boolean => /\.(md|mdx|txt|rst)$/i.test(f);
 
 export class Agent {
@@ -51,7 +53,8 @@ export class Agent {
     private readonly ui: AgentUI,
   ) {
     this.provider = session.newProvider();
-    this.tools = allTools.filter(ROLE_TOOLS[role]);
+    const only = session.cfg.tools;
+    this.tools = allTools.filter((t) => ROLE_TOOLS[role](t) && (!only || only.includes(t.name)));
   }
 
   snapshot(): unknown {

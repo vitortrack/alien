@@ -20,7 +20,7 @@ Uso:
 Opções:
   -p, --provider <ollama|anthropic>  padrão: anthropic com ANTHROPIC_API_KEY, senão ollama
   -m, --model <nome>                 padrão: ${DEFAULT_MODEL.ollama} (ollama) · ${DEFAULT_MODEL.anthropic} (anthropic)
-      --mode <ask|auto|read-only>    permissão para escrita, bash e run_code (padrão: ask)
+      --mode <ask|auto|read-only>    permissão para escrita e bash (padrão: ask)
   -C, --cwd <dir>                    pasta de trabalho (padrão: a atual)
       --orchestrate                  pipeline planner → workers → revisor
       --attempts <n>                 melhor de N: tentativas isoladas, escolhe a que passa nos testes com o menor diff
