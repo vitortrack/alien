@@ -121,14 +121,20 @@ ${goal}
 </request>`;
 }
 
-export function revisePrompt(goal: string, contract: Contract, alreadyPassing: Criterion[]): string {
+const BASELINE_OUTPUT = 400;
+
+export function validatePrompt(goal: string, contract: Contract, baseline: CheckResult[]): string {
   return `${contractPrompt(goal)}
 
-You already wrote the contract below, but these non-guard checks already pass on the unchanged code, so they prove nothing. Rewrite them so they fail now and pass only once the criterion is implemented (or mark them as guards if they really are regression guards). Return the whole corrected contract.
+You already wrote the contract below. Each check was run on the unchanged code; its exit status and the end of its output are below. Validate every check against this evidence:
+- a non-guard check must FAIL now, and only because the feature is missing (a module, export, text or behavior that a slice will add). If it passes, it proves nothing: rewrite it.
+- a check that fails for any other reason (wrong path or working directory, a file no slice creates, a typo, a syntax or quoting error, a missing tool) would fail forever: rewrite it.
+- a guard must PASS now; if it fails, fix it or drop it.
+Return the whole contract, corrected where needed and unchanged elsewhere.
 
-<already_passing>
-${alreadyPassing.map((c) => `- ${c.text}: ${c.check}`).join('\n')}
-</already_passing>
+<baseline>
+${baseline.map((r) => `- [${r.criterion.guard ? 'guard' : 'criterion'} · ${r.pass ? 'PASSES' : 'FAILS'}] ${r.criterion.text}\n  $ ${r.criterion.check}\n  ${r.output.trim().slice(-BASELINE_OUTPUT).replace(/\n/g, '\n  ') || '(no output)'}`).join('\n')}
+</baseline>
 
 <contract>
 ${JSON.stringify(contract, null, 2)}

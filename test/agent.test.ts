@@ -223,7 +223,8 @@ const slice = (title: string, check: string) => ({ title, spec: `faça: ${title}
 
 test('orchestrator: a slice goes back to a fresh worker with the gate failures until its checks pass', async () => {
   const root = workspace();
-  const judge = stubJudge([{ slices: [slice('cria x.txt', 'test -f x.txt')] }, { approved: true, problems: [] }]);
+  const contract = { slices: [slice('cria x.txt', 'test -f x.txt')] };
+  const judge = stubJudge([contract, contract, { approved: true, problems: [] }]);
   const workers = [
     new ScriptedProvider([]),
     new ScriptedProvider([() => answer('pronto')]),
@@ -245,7 +246,7 @@ test('orchestrator: a slice goes back to a fresh worker with the gate failures u
   assert.match(out, /Revisão do motor de decisão: aprovada/);
 });
 
-test('orchestrator: checks that already pass go back to the judge, and review problems go to a fix worker', async () => {
+test('orchestrator: the judge validates its checks against their output on the unchanged code, and review problems go to a fix worker', async () => {
   const root = workspace();
   const judge = stubJudge([
     { slices: [slice('cria x.txt', 'true')] },
@@ -267,7 +268,7 @@ test('orchestrator: checks that already pass go back to the judge, and review pr
   const ui = UI.create();
   const out = await orchestrate(new Session(config(root), ui, () => workers.shift()!), 'crie x.txt', judge);
   ui.close();
-  assert.match(judge.prompts[1]!, /<already_passing>\n- cria x\.txt: true/);
+  assert.match(judge.prompts[1]!, /<baseline>\n- \[criterion · PASSES\] cria x\.txt\n  \$ true/);
   assert.equal(fs.readFileSync(path.join(root, 'x.txt'), 'utf8'), 'certo');
   assert.match(out, /1 problema\(s\) enviados para correção/);
 });
@@ -275,6 +276,7 @@ test('orchestrator: checks that already pass go back to the judge, and review pr
 test('orchestrator: when a slice exhausts its attempts the judge rules on the checks, and a wrong check is corrected', async () => {
   const root = workspace();
   const judge = stubJudge([
+    { slices: [slice('cria x.txt', 'test -f nope/x.txt')] },
     { slices: [slice('cria x.txt', 'test -f nope/x.txt')] },
     { rulings: [{ text: 'cria x.txt', checkIsWrong: true, check: 'test -f x.txt', note: 'caminho errado' }] },
     { approved: true, problems: [] },
@@ -289,7 +291,7 @@ test('orchestrator: when a slice exhausts its attempts the judge rules on the ch
   const out = await orchestrate(new Session(config(root), ui, () => workers.shift()!), 'crie x.txt', judge);
   ui.close();
   assert.equal(workers.length, 0);
-  assert.match(judge.prompts[1]!, /<failing_checks>\n- cria x\.txt\n  \$ test -f nope\/x\.txt/);
+  assert.match(judge.prompts[2]!, /<failing_checks>\n- cria x\.txt\n  \$ test -f nope\/x\.txt/);
   assert.match(out, /✔ cria x\.txt/);
   assert.match(out, /1\/1 passam/);
 });
@@ -297,6 +299,7 @@ test('orchestrator: when a slice exhausts its attempts the judge rules on the ch
 test('orchestrator: a criterion that stays red does not block the gate of later slices', async () => {
   const root = workspace();
   const judge = stubJudge([
+    { slices: [slice('impossível', 'false'), slice('cria y.txt', 'test -f y.txt')] },
     { slices: [slice('impossível', 'false'), slice('cria y.txt', 'test -f y.txt')] },
     { rulings: [{ text: 'impossível', checkIsWrong: false, check: 'false', note: 'faça o impossível' }] },
     { approved: true, problems: [] },
@@ -319,6 +322,36 @@ test('orchestrator: a criterion that stays red does not block the gate of later 
   assert.match(out, /✖ impossível/);
   assert.match(out, /✔ cria y\.txt/);
   assert.match(out, /1\/2 passam/);
+});
+
+test('orchestrator: an interrupted run resumes from the saved contract and skips the slices whose checks still pass', async () => {
+  const root = workspace();
+  const contract = { slices: [slice('cria a.txt', 'test -f a.txt'), slice('cria b.txt', 'test -f b.txt')] };
+  let session!: Session;
+  const first = [
+    new ScriptedProvider([]),
+    new ScriptedProvider([() => call('write_file', { path: 'a.txt', content: 'ok' }), () => answer('pronto')]),
+    new ScriptedProvider([
+      () => {
+        session.abort();
+        return answer('parei');
+      },
+    ]),
+  ];
+  let ui = UI.create();
+  session = new Session(config(root), ui, () => first.shift()!);
+  assert.match(await orchestrate(session, 'crie a e b', stubJudge([contract, contract])), /retomar do ponto em que parou/);
+  ui.close();
+
+  const judge = stubJudge([{ approved: true, problems: [] }]);
+  const second = [new ScriptedProvider([]), new ScriptedProvider([() => call('write_file', { path: 'b.txt', content: 'ok' }), () => answer('pronto')])];
+  ui = UI.create();
+  const out = await orchestrate(new Session(config(root), ui, () => second.shift()!), 'crie a e b', judge);
+  ui.close();
+  assert.equal(second.length, 0);
+  assert.equal(judge.prompts.length, 1, 'the contract must not be written again');
+  assert.match(out, /✔ cria a\.txt\n✔ cria b\.txt/);
+  assert.match(out, /2\/2 passam/);
 });
 
 test('orchestrator: without the decision engine it stops with an explanation instead of crashing', async () => {
