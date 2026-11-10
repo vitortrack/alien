@@ -72,12 +72,25 @@ export function claudeJudge(root: string, model = 'opus'): Judge {
   const judge: Judge = {
     costUsd: 0,
     async ask<T>(prompt: string, schema: object, tools: string[]): Promise<T> {
-      const { stdout } = await exec(
+      const run = exec(
         'claude',
         ['-p', prompt, '--model', model, '--output-format', 'json', '--json-schema', JSON.stringify(schema), '--allowedTools', ...tools, '--no-session-persistence'],
         { cwd: root, timeout: JUDGE_TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024 },
       );
-      const out = JSON.parse(stdout) as { is_error?: boolean; result?: string; structured_output?: T; total_cost_usd?: number };
+      run.child.stdin?.end();
+      let stdout: string;
+      try {
+        ({ stdout } = await run);
+      } catch (e) {
+        stdout = (e as { stdout?: string }).stdout ?? '';
+        if (!stdout.trim()) throw new Error(`motor de decisão não respondeu: ${(e as { stderr?: string }).stderr?.trim().slice(-300) || 'sem saída'}`);
+      }
+      let out: { is_error?: boolean; result?: string; structured_output?: T; total_cost_usd?: number };
+      try {
+        out = JSON.parse(stdout);
+      } catch {
+        throw new Error(`motor de decisão devolveu uma saída inválida: ${stdout.slice(0, 300)}`);
+      }
       judge.costUsd += out.total_cost_usd ?? 0;
       if (out.is_error || !out.structured_output) throw new Error(`motor de decisão falhou: ${String(out.result ?? stdout).slice(0, 300)}`);
       return out.structured_output;
@@ -104,6 +117,8 @@ export function contractPrompt(goal: string): string {
   return `You are the decision engine of a coding pipeline. A weaker coding model will implement the request below in this repository, one slice at a time, each slice in a fresh context that sees ONLY its slice (never the original request). After each slice an automatic gate runs your checks; the slice is accepted only when they all exit 0.
 
 Explore the repository (read the project instructions such as AGENTS.md / CLAUDE.md, the files the request touches and how the project is built and type-checked), then write the contract.
+
+Scope: plan the most direct reading of the request and only the layers it needs. Words like "only", "just", "simple", "in memory" set a ceiling. Do not add slices or criteria for other layers (backend, database, migrations, permissions, config) to follow a project convention or for consistency; add them only when the requested flow cannot work without them.
 
 Slices:
 - 1 to 8 slices, ordered so that each one only depends on earlier ones; each slice touches 1 to 3 files.
@@ -148,7 +163,7 @@ Report only real problems:
 - a requirement of the request that is missing or wrong, even if a check passes;
 - code written to satisfy a check without implementing the behavior (text placed in comments, special-cased inputs, hard-coded results);
 - code that breaks, or a violation of the project instructions (AGENTS.md / CLAUDE.md);
-- changes the request does not need.
+- changes the request does not need, including changes in another layer (backend, database, migrations, permissions, config) that the requested flow does not depend on, even when the project usually makes them (data kept in memory needs no migration).
 No style preferences or pre-existing issues. approved = true when there is no real problem; then problems is empty.
 
 <request>
