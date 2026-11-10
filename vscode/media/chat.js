@@ -115,8 +115,13 @@
   const toolCount = (w) => (w.tools ? ` · ${w.tools} ${w.tools === 1 ? 'ferramenta' : 'ferramentas'}` : '');
   const compact = (n) => n.toLocaleString('pt-BR', { notation: 'compact', maximumFractionDigits: 1 });
 
+  let stick = true;
+  messages.addEventListener('scroll', () => {
+    stick = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 48;
+  });
+
   function scroll() {
-    messages.scrollTop = messages.scrollHeight;
+    if (stick) messages.scrollTop = messages.scrollHeight;
   }
 
   function add(className, html, parent = messages) {
@@ -128,34 +133,57 @@
     return el;
   }
 
+  const CARET = '<span class="caret"></span>';
+  const withCaret = (html) => (/<\/[a-z0-9]+>\s*$/i.test(html) ? html.replace(/(<\/[a-z0-9]+>)\s*$/i, `${CARET}$1`) : html + CARET);
+
+  function typer(el, render) {
+    const t = { el, render, target: '', shown: 0, raf: 0, open: true };
+    const tick = () => {
+      const backlog = t.target.length - t.shown;
+      t.shown = Math.min(t.target.length, t.shown + Math.max(2, Math.ceil(backlog / 6)));
+      const html = render(t.target.slice(0, t.shown));
+      t.el.innerHTML = t.open ? withCaret(html) : html;
+      scroll();
+      t.raf = t.shown < t.target.length ? requestAnimationFrame(tick) : 0;
+    };
+    t.feed = (delta) => {
+      t.target += delta;
+      if (!t.raf) t.raf = requestAnimationFrame(tick);
+    };
+    t.close = () => {
+      cancelAnimationFrame(t.raf);
+      t.raf = 0;
+      t.open = false;
+      t.shown = t.target.length;
+      t.el.innerHTML = render(t.target);
+    };
+    return t;
+  }
+
   function startWork() {
     if (work) return work;
-    const el = document.createElement('details');
-    el.className = 'work active';
-    el.open = true;
-    el.innerHTML = `<summary>${ALIEN}<span class="verb">Trabalhando…</span><span class="meta"></span></summary><div class="work-body"></div>`;
+    const el = document.createElement('div');
+    el.className = 'timeline';
     messages.appendChild(el);
     working.innerHTML = `${ALIEN}<span class="verb"></span><span class="meta"></span>`;
     working.hidden = false;
     work = {
       el,
-      body: el.querySelector('.work-body'),
+      body: el,
       verb: working.querySelector('.verb'),
       meta: working.querySelector('.meta'),
-      summaryMeta: el.querySelector('.meta'),
       started: Date.now(),
       tools: 0,
       tokens: '',
       tick: 0,
-      thoughtEl: null,
-      thoughtText: '',
+      text: null,
+      think: null,
+      lastTool: null,
     };
     const w = work;
     const paint = () => {
       if (w.tick % 4 === 0) w.verb.textContent = `${pick()}…`;
-      const meta = `${seconds(w)}s${toolCount(w)}${w.tokens}`;
-      w.meta.textContent = `(${meta})`;
-      w.summaryMeta.textContent = meta;
+      w.meta.textContent = `(${seconds(w)}s${toolCount(w)}${w.tokens})`;
       w.tick++;
     };
     paint();
@@ -164,28 +192,65 @@
     return w;
   }
 
+  function endThinking() {
+    const w = work;
+    if (!w?.think) return;
+    w.think.typer.close();
+    const secs = Math.max(1, Math.round((Date.now() - w.think.started) / 1000));
+    w.think.label.textContent = `Pensou por ${secs}s`;
+    w.think.el.classList.remove('live');
+    w.think.el.open = false;
+    w.think = null;
+  }
+
+  function endThought() {
+    const w = work;
+    if (!w) return;
+    endThinking();
+    if (w.text) {
+      w.text.typer.close();
+      w.text = null;
+    }
+  }
+
   function finishWork(state) {
     const w = work;
     if (!w) return;
+    endThought();
     work = null;
     clearInterval(w.timer);
     working.hidden = true;
     working.innerHTML = '';
-    w.el.classList.remove('active');
-    if (!w.body.children.length) {
-      w.el.remove();
-      return;
-    }
-    w.el.querySelector('.verb').textContent = state === 'done' ? `Pensou por ${seconds(w)}s` : `Interrompido após ${seconds(w)}s`;
-    w.summaryMeta.textContent = `${toolCount(w)}${w.tokens}`.replace(/^ · /, '');
-    w.el.open = false;
+    if (!w.el.children.length) w.el.remove();
+    else if (state !== 'done') add('item notice warn', `Interrompido após ${seconds(w)}s`, w.el);
   }
 
-  function endThought() {
-    if (work) {
-      work.thoughtEl = null;
-      work.thoughtText = '';
+  function thinkingDelta(delta) {
+    const w = startWork();
+    if (w.text) {
+      w.text.typer.close();
+      w.text = null;
     }
+    if (!w.think) {
+      const el = document.createElement('details');
+      el.className = 'item thinking live';
+      el.open = true;
+      el.innerHTML = '<summary><span class="label">Pensando…</span></summary><div class="think-body"></div>';
+      w.el.appendChild(el);
+      w.think = { el, label: el.querySelector('.label'), started: Date.now(), typer: typer(el.querySelector('.think-body'), markdown) };
+    }
+    w.think.typer.feed(delta);
+  }
+
+  function textDelta(delta) {
+    const w = startWork();
+    endThinking();
+    if (!w.text) {
+      const el = add('item text', '', w.el);
+      w.text = { el, raw: '', typer: typer(el, markdown) };
+    }
+    w.text.raw += delta;
+    w.text.typer.feed(delta);
   }
 
   const target = () => (work ? work.body : messages);
@@ -205,7 +270,11 @@
 
   function showAnswer(text) {
     const w = work;
-    if (w && w.thoughtEl && w.thoughtText.trim() === String(text).trim()) w.thoughtEl.remove();
+    if (w?.text && w.text.raw.trim() === String(text).trim()) {
+      w.text.typer.close();
+      w.text.el.remove();
+      w.text = null;
+    }
     finishWork('done');
     add('msg assistant', markdown(text));
   }
@@ -223,16 +292,12 @@
       case 'words':
         if (Array.isArray(m.words) && m.words.length) words = m.words;
         break;
-      case 'text': {
-        const w = startWork();
-        if (!w.thoughtEl) w.thoughtEl = add('thought', '', w.body);
-        w.thoughtText += m.delta;
-        w.thoughtEl.innerHTML = markdown(w.thoughtText);
-        scroll();
+      case 'text':
+        textDelta(m.delta);
         break;
-      }
       case 'thinking':
-        startWork();
+        if (m.delta) thinkingDelta(m.delta);
+        else startWork();
         break;
       case 'tokens':
         if (work && m.input + m.output) work.tokens = ` · ↑ ${compact(m.input)} ↓ ${compact(m.output)} tokens`;
@@ -241,7 +306,7 @@
         const w = startWork();
         endThought();
         w.tools++;
-        add(`tool${m.agent ? ' sub' : ''}`, `${agentTag(m.agent)}<span class="tool-name">⚙ ${esc(m.name)}</span> <span class="tool-args">${esc(m.args)}</span>`, w.body);
+        w.lastTool = add(`item tool${m.agent ? ' sub' : ''}`, `<div class="tool-head">${agentTag(m.agent)}<span class="tool-name">${esc(m.name)}</span> <span class="tool-args">${esc(m.args)}</span></div>`, w.body);
         break;
       }
       case 'observation': {
@@ -251,7 +316,7 @@
         const details = document.createElement('details');
         details.className = `obs ${m.ok ? 'ok' : 'fail'}${m.agent ? ' sub' : ''}`;
         details.innerHTML = `<summary>${m.ok ? '✓' : '✗'} ${first}${more}</summary><pre><code>${linkRefs(esc(m.output))}</code></pre>`;
-        target().appendChild(details);
+        (work?.lastTool ?? target()).appendChild(details);
         scroll();
         break;
       }
@@ -260,12 +325,12 @@
         break;
       case 'phase':
         endThought();
-        add('phase', esc(m.title), target());
+        add(work ? 'item phase' : 'phase', esc(m.title), target());
         break;
       case 'info':
       case 'warn':
         endThought();
-        add(`notice ${m.type}${m.agent ? ' sub' : ''}`, `${agentTag(m.agent)}${inline(m.message)}`, target());
+        add(`${work ? 'item ' : ''}notice ${m.type}${m.agent ? ' sub' : ''}`, `${agentTag(m.agent)}${inline(m.message)}`, target());
         break;
       case 'error':
         finishWork('stopped');
@@ -277,11 +342,10 @@
         break;
       case 'confirm': {
         const w = startWork();
-        w.el.open = true;
         endThought();
         const always = m.alwaysLabel ? `<button class="always secondary">Sempre: ${esc(m.alwaysLabel)}</button>` : '';
         const box = add(
-          'confirm',
+          'item confirm',
           `${agentTag(m.agent)}<div class="question">${inline(m.question)}</div><div class="buttons"><button class="allow">Permitir</button>${always}<button class="deny secondary">Negar</button></div>`,
           w.body,
         );
@@ -335,6 +399,7 @@
     const text = input.value.trim();
     if (!text || sendBtn.disabled) return;
     messages.querySelector('.welcome')?.remove();
+    stick = true;
     add('msg user', esc(text).replace(/\n/g, '<br>'));
     vscode.postMessage({ type: 'send', text, orchestrate: orchestrate.checked, best3: best3.checked });
     input.value = '';
