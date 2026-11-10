@@ -241,7 +241,7 @@ export function keys() {
   };
 }
 
-const REVIEW_TASK = `Revisão da foto pelo operador, em src/review/service.js (dados em src/db.js; aluno = { id, operatorId, name, photoKey, originalKey, photoStatus, pendingReason }):
+const REVIEW_TASK = `Revisão da foto pelo operador, em src/review/service.js (dados em src/db.js; aluno = { id, operatorId, name, photoKey, originalKey, photoStatus, pendingReason }, com photoStatus 'aprovada_automaticamente', 'pendente_revisao' ou null):
 - listPending(operatorId): alunos do operador com foto pendente, como [{ id, name, reasonLabel }]. A API devolve o rótulo pronto, não o código: ${Object.entries(LABELS).map(([k, v]) => `${k} = "${v}"`).join('; ')}.
 - approve(operatorId, studentId, userId): a foto passa a aprovada_automaticamente, sem motivo.
 - adjust(operatorId, studentId, area, userId): gera de novo a foto final a partir do original (crop de src/photo/frame.js sobre o original do storage), grava em storage.put('fotos_processadas', ...) e aponta photoKey para ela. Ajustar não aprova: continua pendente, com o mesmo motivo. A foto final anterior não é apagada nesta operação.
