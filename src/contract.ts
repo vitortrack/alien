@@ -52,15 +52,6 @@ export const CONTRACT_SCHEMA = object({
 
 export const REVIEW_SCHEMA = object({ approved: { type: 'boolean' }, problems: list(object({ file: text, problem: text, fix: text })) });
 
-export interface Ruling {
-  text: string;
-  checkIsWrong: boolean;
-  check: string;
-  note: string;
-}
-
-export const RULING_SCHEMA = object({ rulings: list(object({ text, checkIsWrong: { type: 'boolean' }, check: text, note: text })) });
-
 export const READ_TOOLS = ['Read', 'Grep', 'Glob'];
 export const REVIEW_TOOLS = [...READ_TOOLS, 'Bash(git diff:*)', 'Bash(git status:*)'];
 
@@ -173,21 +164,6 @@ ${goal}
 <contract>
 ${JSON.stringify(contract, null, 2)}
 </contract>`;
-}
-
-export function arbitratePrompt(brief: string, failed: CheckResult[]): string {
-  return `You are the decision engine of a coding pipeline. A weaker coding model worked on the assignment below several times, and the automatic gate still fails on the checks listed at the end. Inspect the current code in this repository and decide, for each failing check, whether the check itself is wrong (wrong path or working directory, a name or shape the assignment never specified, a broken command) or the code does not implement the criterion.
-- checkIsWrong true: "check" is the corrected bash command. Same rules as before: run from the repository root, exits 0 if and only if the criterion holds, fast, offline, no writes. "note" says what was wrong with it.
-- checkIsWrong false: "check" repeats the original command, and "note" says precisely what the code must change.
-Return one ruling per failing check, in the same order; "text" repeats the criterion.
-
-<assignment>
-${brief}
-</assignment>
-
-<failing_checks>
-${failed.map((f) => `- ${f.criterion.text}\n  $ ${f.criterion.check}\n${f.output.trim() || '(no output)'}`).join('\n')}
-</failing_checks>`;
 }
 
 export function sliceBrief(slice: Slice): string {
