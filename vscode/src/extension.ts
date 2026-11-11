@@ -110,6 +110,17 @@ function readConfig(root: string): Config {
 
 const OPEN_SESSION = 'trackai.openSession';
 
+async function localModels(current: string): Promise<string[]> {
+  try {
+    const res = await fetch(`${process.env.OLLAMA_HOST}/api/tags`);
+    const body = (await res.json()) as { models?: { name: string; details?: { family?: string } }[] };
+    const names = (body.models ?? []).filter((m) => !/embed/i.test(m.name) && !/bert/i.test(m.details?.family ?? '')).map((m) => m.name);
+    return [...new Set([current, ...names])].sort();
+  } catch {
+    return [current];
+  }
+}
+
 class ChatViewProvider implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
   private session: Session | undefined;
@@ -162,6 +173,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
     <label class="toggle"><input type="checkbox" id="orchestrate"> multiagente</label>
     <label class="toggle" title="Roda 3 tentativas isoladas e aplica a que passa nos testes com o menor diff (3× mais tokens)"><input type="checkbox" id="best3"> melhor de 3</label>
     <span class="spacer"></span>
+    <select id="model" title="Modelo do Ollama (lista os modelos instalados nesta máquina)" aria-label="Modelo"></select>
     <button type="button" id="stop" hidden>Parar</button>
     <button type="submit" id="send">Enviar</button>
   </div>
@@ -198,7 +210,13 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
     const cfg = readConfig(root);
     const current = this.session?.cfg;
     if (!this.session || current?.root !== root || current.provider !== cfg.provider || current.model !== cfg.model || current.embedModel !== cfg.embedModel) {
+      const previous = this.session;
       this.session = new Session(cfg, new WebviewUI(this.post, this.pending));
+      if (previous?.turns.length && current?.root === root && current.provider === cfg.provider) {
+        previous.save();
+        const saved = previous.sessions.load(previous.id);
+        if (saved) this.session.resume(saved);
+      }
     } else {
       Object.assign(this.session.cfg, { mode: cfg.mode, lang: cfg.lang, review: cfg.review, maxSteps: cfg.maxSteps });
     }
@@ -213,10 +231,13 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
         if (root) {
           const cfg = readConfig(root);
           this.post({ type: 'status', text: `${cfg.provider} · ${cfg.model} · ${cfg.mode}` });
+          this.post({ type: 'models', models: await localModels(cfg.model), current: cfg.model });
           this.restore(root);
         }
         return;
       }
+      case 'setModel':
+        return this.setModel(String(m.model ?? ''));
       case 'send':
         return this.send(String(m.text ?? ''), m.orchestrate === true, m.best3 === true);
       case 'stop':
@@ -231,6 +252,17 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
         this.newChat();
         return;
     }
+  }
+
+  private async setModel(model: string): Promise<void> {
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!model || !root || this.session?.busy) return;
+    const config = vscode.workspace.getConfiguration('trackai');
+    if (readConfig(root).provider !== 'ollama') await config.update('provider', 'ollama', vscode.ConfigurationTarget.Global);
+    await config.update('model', model, vscode.ConfigurationTarget.Global);
+    if (this.session) this.ensureSession();
+    const cfg = readConfig(root);
+    this.post({ type: 'status', text: `${cfg.provider} · ${cfg.model} · ${cfg.mode}` });
   }
 
   private async send(text: string, viaOrchestrator: boolean, best3: boolean): Promise<void> {

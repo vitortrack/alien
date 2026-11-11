@@ -11,6 +11,7 @@
   const orchestrate = $('orchestrate');
   const best3 = $('best3');
   const working = $('working');
+  const modelSel = $('model');
 
 
   const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -309,6 +310,7 @@
   function setBusy(busy) {
     stopBtn.hidden = !busy;
     sendBtn.disabled = busy;
+    modelSel.disabled = busy;
     if (busy) startWork();
     else finishWork('stopped');
   }
@@ -403,6 +405,9 @@
       case 'status':
         statusEl.textContent = m.text;
         break;
+      case 'models':
+        modelSel.innerHTML = m.models.map((name) => `<option value="${esc(name)}"${name === m.current ? ' selected' : ''}>${esc(name)}</option>`).join('');
+        break;
       case 'restored':
         messages.querySelector('.welcome')?.remove();
         clearMessages();
@@ -443,6 +448,7 @@
     }
   });
   stopBtn.addEventListener('click', () => vscode.postMessage({ type: 'stop' }));
+  modelSel.addEventListener('change', () => vscode.postMessage({ type: 'setModel', model: modelSel.value }));
   messages.addEventListener('click', (e) => {
     const ref = e.target.closest('a.ref');
     if (!ref) return;
