@@ -6,7 +6,7 @@ import { bestOf } from './attempts.js';
 import { readMemories } from './memory.js';
 import { orchestrate } from './orchestrator.js';
 import { gateFor } from './gate.js';
-import { claudeJudge } from './contract.js';
+import { agentJudge } from './judge.js';
 import { LANGUAGE_NAMES, languageName } from './prompts.js';
 import type { Effort } from './providers/anthropic.js';
 import { DEFAULT_EMBED_MODEL, DEFAULT_MODEL, Session, type Config } from './session.js';
@@ -25,7 +25,7 @@ Opções:
       --mode <ask|auto|read-only>    permissão para escrita e bash (padrão: ask)
   -C, --cwd <dir>                    pasta de trabalho (padrão: a atual)
       --orchestrate                  contrato (Claude) → fatias com portão → revisão
-      --gate                         Claude escreve checagens de pronto (uma chamada, sem explorar o repo); o agente só conclui quando passam
+      --gate                         o próprio modelo escreve checagens de pronto (uma chamada, sem explorar o repo); o agente só conclui quando passam
       --gate-file <arquivo>          reaproveita as checagens salvas nesse arquivo (uma vez por card) ou grava as novas nele
       --harness <arquivo>            texto de harness específico da tarefa (RHI), posto antes do pedido
       --handoff <arquivo>            lê a nota da execução anterior no início e grava a nota desta no fim
@@ -221,7 +221,7 @@ async function main(): Promise<void> {
     if (gate && !orchestrateTask) {
       ui.phase('Portão: checagens de pronto');
       try {
-        cfg.gate = await gateFor(cfg.root, task, claudeJudge(cfg.root), gateFile);
+        cfg.gate = await gateFor(cfg.root, task, agentJudge(session), gateFile);
         ui.info(`${cfg.gate.length} checagens de pronto escritas pelo motor de decisão`);
         session.log({ event: 'gate', gate: cfg.gate });
       } catch (e) {

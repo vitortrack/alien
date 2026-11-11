@@ -57,38 +57,6 @@ export const REVIEW_TOOLS = [...READ_TOOLS, 'Bash(git diff:*)', 'Bash(git status
 
 const CHECK_TIMEOUT_MS = 120_000;
 const OUTPUT_LIMIT = 1500;
-const JUDGE_TIMEOUT_MS = 30 * 60_000;
-
-export function claudeJudge(root: string, model = 'opus'): Judge {
-  const judge: Judge = {
-    costUsd: 0,
-    async ask<T>(prompt: string, schema: object, tools: string[]): Promise<T> {
-      const run = exec(
-        'claude',
-        ['-p', prompt, '--model', model, '--output-format', 'json', '--json-schema', JSON.stringify(schema), ...(tools.length ? ['--allowedTools', ...tools] : ['--tools', '']), '--no-session-persistence'],
-        { cwd: root, timeout: JUDGE_TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024 },
-      );
-      run.child.stdin?.end();
-      let stdout: string;
-      try {
-        ({ stdout } = await run);
-      } catch (e) {
-        stdout = (e as { stdout?: string }).stdout ?? '';
-        if (!stdout.trim()) throw new Error(`motor de decisão não respondeu: ${(e as { stderr?: string }).stderr?.trim().slice(-300) || 'sem saída'}`);
-      }
-      let out: { is_error?: boolean; result?: string; structured_output?: T; total_cost_usd?: number };
-      try {
-        out = JSON.parse(stdout);
-      } catch {
-        throw new Error(`motor de decisão devolveu uma saída inválida: ${stdout.slice(0, 300)}`);
-      }
-      judge.costUsd += out.total_cost_usd ?? 0;
-      if (out.is_error || !out.structured_output) throw new Error(`motor de decisão falhou: ${String(out.result ?? stdout).slice(0, 300)}`);
-      return out.structured_output;
-    },
-  };
-  return judge;
-}
 
 export async function runChecks(root: string, criteria: Criterion[]): Promise<CheckResult[]> {
   const results: CheckResult[] = [];

@@ -1,7 +1,11 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import { parseArgs } from 'node:util';
-import { claudeJudge, type Judge } from './contract.js';
+import path from 'node:path';
+import type { Judge } from './contract.js';
+import { agentJudge } from './judge.js';
+import { DEFAULT_EMBED_MODEL, DEFAULT_MODEL, Session } from './session.js';
+import { UI } from './ui.js';
 
 export interface Verdict {
   winner: 'A' | 'B' | 'tie';
@@ -106,10 +110,18 @@ async function main(): Promise<void> {
     options: { docs: { type: 'string' }, task: { type: 'string' }, a: { type: 'string' }, b: { type: 'string' }, harness: { type: 'string' }, evidence: { type: 'string' }, history: { type: 'string' } },
   });
   const read = (file: string | undefined): string => (file && fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '');
-  const judge = claudeJudge(os.tmpdir());
+  const provider = process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN ? 'anthropic' : 'ollama';
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-rhi-'));
+  const ui = UI.create();
+  const session = new Session(
+    { provider, model: process.env.TRACKAI_MODEL ?? DEFAULT_MODEL[provider], mode: 'read-only', root, maxSteps: 40, review: false, effort: 'high', numCtx: 65536, embedModel: DEFAULT_EMBED_MODEL, tokenBudget: 0, lang: 'en', logDir: null },
+    ui,
+  );
+  const judge = agentJudge(session);
   const request = read(values.task);
   if (positionals[0] === 'digest') {
     console.log(await digest(judge, request, (values.docs ?? '').split(',').filter(Boolean)));
+    ui.close();
     return;
   }
   const result =
@@ -117,6 +129,7 @@ async function main(): Promise<void> {
       ? await compare(judge, request, read(values.a), read(values.b))
       : await refine(judge, request, read(values.harness), read(values.evidence), (JSON.parse(read(values.history) || '[]') as Verdict[]));
   console.log(JSON.stringify(result, null, 2));
+  ui.close();
 }
 
 if (process.argv[1]?.endsWith('rhi.ts')) void main();

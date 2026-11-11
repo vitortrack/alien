@@ -15,9 +15,28 @@ Causa raiz: o laço começa em i = 1 e pula o primeiro item…
 ℹ revisor aprovou o trabalho
 ```
 
-## Instalação
+## Requisitos
 
-Requer Node.js 22+.
+O mesmo núcleo roda no CLI e na extensão do VS Code, então os requisitos são os mesmos, com duas diferenças: o CLI precisa de **Node.js 22+**, e a extensão precisa de **VS Code 1.90+** (ela já leva o Node do próprio VS Code e o código do TrackAI dentro do `.vsix`, sem precisar de Node nem npm na máquina).
+
+**Obrigatório**
+
+- **Um modelo**, de uma destas formas:
+  - **Ollama** instalado e rodando em `http://localhost:11434`. Para outro endereço, use `OLLAMA_HOST` no CLI ou *Settings → TrackAI → Ollama Host* na extensão. O modelo padrão, `glm-5.3-flash:cloud`, roda na nuvem do Ollama: é preciso entrar na conta com `ollama signin`. Modelos locais (`-m qwen3:8b`, por exemplo) não precisam de conta, só de `ollama pull`.
+  - **Ou Claude**, com `ANTHROPIC_API_KEY` no ambiente. Na extensão, a variável precisa existir no ambiente em que o VS Code foi aberto.
+- **`bash`, `git`, `grep` e `find` no PATH.** Linux e macOS já trazem. No Windows, use WSL ou Git Bash: a ferramenta de terminal do agente chama `bash` diretamente.
+
+O TrackAI não depende do Claude Code: o modo multiagente (`--orchestrate`), as checagens de pronto (`--gate`) e a reescrita de harness (`src/rhi.ts`) usam o mesmo modelo configurado para o agente, por meio de um agente do próprio TrackAI só de leitura, que devolve as decisões em JSON validado.
+
+**Opcional, por recurso**
+
+| Recurso | Precisa de | Sem ele |
+|---|---|---|
+| Busca semântica no código e memória de longo prazo | `ollama pull qwen3-embedding:0.6b` | a busca usa só palavras-chave (BM25) |
+| Ferramenta `run_code` | `python3` ou `node` no PATH, conforme a linguagem | a ferramenta falha só para a linguagem que faltar |
+| Reverter edições que deixam erro de tipo | TypeScript instalado no projeto aberto | a checagem não roda e a edição é aplicada |
+
+## Instalação
 
 ```bash
 npm install

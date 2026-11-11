@@ -1,5 +1,4 @@
 import {
-  claudeJudge,
   CONTRACT_SCHEMA,
   contractPrompt,
   failureBrief,
@@ -18,6 +17,7 @@ import {
   validatePrompt,
 } from './contract.js';
 import { createHash } from 'node:crypto';
+import { agentJudge } from './judge.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { projectDataDir } from './paths.js';
@@ -69,7 +69,7 @@ function saveProgress(file: string, progress: Progress): void {
   fs.writeFileSync(file, JSON.stringify(progress, null, 2));
 }
 
-export function orchestrate(session: Session, goal: string, judge: Judge = claudeJudge(session.cfg.root)): Promise<string> {
+export function orchestrate(session: Session, goal: string, judge: Judge = agentJudge(session)): Promise<string> {
   return session.track(async () => {
     const { ui } = session;
 
@@ -81,7 +81,7 @@ export function orchestrate(session: Session, goal: string, judge: Judge = claud
       try {
         progress = { goal, contract: await writeContract(session, goal, judge), done: [], finished: false };
       } catch (e) {
-        return `Não foi possível escrever o contrato com o motor de decisão (Claude Code, comando \`claude\`): ${e instanceof Error ? e.message : String(e)}`;
+        return `Não foi possível escrever o contrato com o motor de decisão: ${e instanceof Error ? e.message : String(e)}`;
       }
       if (!progress.contract.slices.length) return 'O motor de decisão não produziu nenhuma fatia.';
       saveProgress(file, progress);

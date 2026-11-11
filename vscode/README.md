@@ -9,4 +9,4 @@ Chat com o agente de código autônomo TrackAI na barra lateral (ícone do alien
 
 Configurações em *Settings → TrackAI*: provedor (Ollama local ou Claude), modelo, permissões, idioma, revisão e modelo de embedding.
 
-Requer o [Ollama](https://ollama.com) rodando (`ollama pull qwen3-embedding:0.6b`) ou `ANTHROPIC_API_KEY` no ambiente.
+Requer VS Code 1.90+, `bash`, `git`, `grep` e `find` no PATH (no Windows, WSL ou Git Bash) e um modelo: o [Ollama](https://ollama.com) rodando, com `ollama signin` para o modelo padrão `glm-5.3-flash:cloud`, ou `ANTHROPIC_API_KEY` no ambiente em que o VS Code foi aberto. A busca semântica usa `ollama pull qwen3-embedding:0.6b`; sem ele, cai para palavras-chave. Detalhes em *Requisitos* no README do projeto.
