@@ -65,7 +65,7 @@ export function claudeJudge(root: string, model = 'opus'): Judge {
     async ask<T>(prompt: string, schema: object, tools: string[]): Promise<T> {
       const run = exec(
         'claude',
-        ['-p', prompt, '--model', model, '--output-format', 'json', '--json-schema', JSON.stringify(schema), '--allowedTools', ...tools, '--no-session-persistence'],
+        ['-p', prompt, '--model', model, '--output-format', 'json', '--json-schema', JSON.stringify(schema), ...(tools.length ? ['--allowedTools', ...tools] : ['--tools', '']), '--no-session-persistence'],
         { cwd: root, timeout: JUDGE_TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024 },
       );
       run.child.stdin?.end();

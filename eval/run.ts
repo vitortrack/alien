@@ -12,7 +12,7 @@ import type { Provider, StepResult, ToolResult } from '../src/types.js';
 import { UI } from '../src/ui.js';
 import { englishInProse } from './language.js';
 import { cardScenarios } from './card-scenarios.js';
-import { hardScenarios, impossibleScenarios, longScenarios, realScenarios, scenarios, skillScenarios, type Scenario } from './scenarios.js';
+import { hardScenarios, harnessScenarios, impossibleScenarios, longScenarios, realScenarios, scenarios, skillScenarios, type Scenario } from './scenarios.js';
 
 type Trace = { texts: string[]; steps: number; toolErrors: Record<string, number>; toolCalls: Record<string, number> };
 type RunResult = {
@@ -166,7 +166,7 @@ async function pool<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>
   return results;
 }
 
-const suites: Record<string, Scenario[]> = { base: scenarios, hard: hardScenarios, real: realScenarios, impossible: impossibleScenarios, long: longScenarios, skills: skillScenarios, card: cardScenarios, all: [...scenarios, ...hardScenarios, ...realScenarios] };
+const suites: Record<string, Scenario[]> = { base: scenarios, hard: hardScenarios, real: realScenarios, impossible: impossibleScenarios, long: longScenarios, skills: skillScenarios, card: cardScenarios, harness: harnessScenarios, all: [...scenarios, ...hardScenarios, ...realScenarios] };
 const selected = (suites[values.suite!] ?? suites.all!).filter((s) => !values.filter || s.id.includes(values.filter));
 const jobs = selected.flatMap((s) => Array.from({ length: Number(values.runs) }, (_, k) => ({ s, run: k + 1 })));
 console.log(`TrackAI eval · ${values.provider}/${values.model} · ${selected.length} cenários × ${values.runs} = ${jobs.length} execuções → ${outDir}`);

@@ -1,7 +1,9 @@
 import { systemPrompt, type Role } from './prompts.js';
 import { changedFiles, nestedInstructions, scopeReport, workspaceDiff } from './scope.js';
+import type { CheckResult } from './contract.js';
+import { orderedChecks } from './gate.js';
 import type { Session } from './session.js';
-import { allTools, cleanPath, describeInput, permit, suggestPath, type Tool, type ToolContext } from './tools.js';
+import { allTools, cleanPath, describeInput, offload, permit, suggestPath, toolLoader, type Tool, type ToolContext } from './tools.js';
 import type { Provider, ToolCall, ToolResult } from './types.js';
 import type { AgentUI } from './agent-ui.js';
 import { validateInput } from './validate.js';
@@ -11,6 +13,9 @@ import { formatErrors, typeDiagnostics, typeErrors } from './diagnostics.js';
 import { isReadOnlyCommand } from './shell.js';
 
 const researchOnly = (t: Tool): boolean => t.readOnly && !['delegate', 'update_plan', 'remember', 'report_conflict', 'skill'].includes(t.name);
+
+const PAGED_TOOLS = ['read_file', 'skill'];
+const toolKey = (name: string): string => name.toLowerCase().replace(/[^a-z]/g, '');
 
 const BASH_COVERS = ['update_plan', 'remember', 'run_code', 'list_dir', 'glob', 'grep'];
 
@@ -22,19 +27,16 @@ const ROLE_TOOLS: Record<Role, (t: Tool) => boolean> = {
 };
 
 const MAX_REVIEWS = 2;
-const FAILURE_STREAK = 3;
 const MAX_IDENTICAL_CALLS = 3;
 const RECALLED = 5;
-const EXPLORE_BUDGET = 15;
-const EXPLORE_REMINDER_EVERY = 10;
-const REREAD_WARNING_AT = 3;
 const MAX_SCOPE_CHECKS = 2;
-const RECAP_EVERY = 30;
-const EDIT_LOOP_AT = 5;
-const EDIT_LOOP_EVERY = 3;
+const RUN_END = 'This run is ending. The next run continues this work from a handoff note only, without your context.';
+const HANDOFF_REQUEST = (lead: string): string =>
+  `[handoff] ${lead} Write that note now, without calling tools, with exactly these sections:\n## State (what is done and verified, with file paths)\n## Decisions (choices made and why, constraints learned)\n## Tried and failed (each approach that did not work, with the exact error, so the next run does not repeat it)\n## Next steps (what remains, in order)\nBe dense and factual: keep exact paths, identifiers, commands and error strings.`;
+const stepsLeft = (max: number, step: number): string => `You have used ${step} of your ${max} steps (${max - step} left).`;
+const gateList = (results: CheckResult[]): string => results.map((r) => `- ${r.criterion.text}\n  $ ${r.criterion.check}${r.pass ? '' : `\n  ${r.output.trim().slice(-600).replace(/\n/g, '\n  ') || '(no output)'}`}`).join('\n');
 const VERIFY_NUDGE =
   '[verification] You changed code but have not run anything since your last edit. Before your final answer, run the tests, build or type-check that cover the change (or execute the changed code) and read the whole output; fix what fails. If nothing in this project can be run, say so explicitly in the final answer.';
-export const verifyReserve = (maxSteps: number): number => Math.min(maxSteps - 1, Math.max(2, Math.ceil(maxSteps * 0.1)));
 export const budgetWarning = (left: number, unverified: boolean): string =>
   unverified
     ? `[budget] Only ${left} steps left. Stop adding new work now: run the type-check, build or tests that cover your changes, fix what fails, then give the final report and list every requested item that is not done.`
@@ -53,16 +55,16 @@ const isDocFile = (f: string): boolean => /\.(md|mdx|txt|rst)$/i.test(f);
 export class Agent {
   private readonly provider: Provider;
   private readonly tools: Tool[];
+  private readonly deferred: Tool[];
   private systemCache: { key: string; text: string } | null = null;
   private changed = false;
   private readonly callCounts = new Map<string, number>();
   private readonly files = new Map<string, number>();
-  private readonly reads = new Map<string, number>();
-  private mutations = 0;
+  private step = 0;
+  private readonly startedAt = Date.now();
   private readonly touched = new Set<string>();
   private readonly instructionsSeen = new Set<string>();
   private verifiedSinceEdit = true;
-  private readonly editsPerFile = new Map<string, number>();
 
   constructor(
     private readonly session: Session,
@@ -72,7 +74,21 @@ export class Agent {
     this.provider = session.newProvider();
     const only = session.cfg.tools;
     const lean = role === 'main' && session.cfg.provider === 'anthropic';
-    this.tools = allTools.filter((t) => ROLE_TOOLS[role](t) && !(lean && BASH_COVERS.includes(t.name)) && (!only || only.includes(t.name)) && (t.name !== 'skill' || session.skills.length > 0));
+    const available = allTools.filter((t) => ROLE_TOOLS[role](t) && !(lean && BASH_COVERS.includes(t.name)) && (!only || only.includes(t.name)) && (t.name !== 'skill' || session.skills.length > 0));
+    this.deferred = only ? [] : available.filter((t) => t.group);
+    this.tools = available.filter((t) => !this.deferred.includes(t));
+    if (this.deferred.length) this.tools.push(toolLoader(this.deferred, (names) => this.enable(names)));
+    this.tools.push({
+      name: 'status',
+      readOnly: true,
+      description: 'Shows how many steps of this task you have used and how many are left, the elapsed time and the tokens used so far.',
+      schema: { type: 'object', properties: {}, required: [] },
+      run: async () => `${stepsLeft(session.cfg.maxSteps, this.step)} Elapsed: ${Math.round((Date.now() - this.startedAt) / 60_000)} min. Tokens used: ${session.usage.input + session.usage.output}.`,
+    });
+  }
+
+  private enable(names: string[]): void {
+    for (const t of this.deferred) if (names.includes(t.name) && !this.tools.includes(t)) this.tools.push(t);
   }
 
   snapshot(): unknown {
@@ -91,19 +107,42 @@ export class Agent {
   }
 
   async run(task: string): Promise<string> {
+    const out = await this.loop(task);
+    const file = this.role === 'main' ? this.session.cfg.handoff : undefined;
+    if (file && !this.session.signal.aborted) {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, await this.note(task));
+      this.session.log({ agent: this.role, event: 'handoff-saved', file });
+    }
+    return out;
+  }
+
+  private opening(task: string): string {
+    const { handoff, gate, harness } = this.session.cfg;
+    if (this.role !== 'main') return task;
+    const previous = handoff ? readIfExists(handoff) : null;
+    const head = previous ? `<previous_handoff>\nNote left by the previous run on this work. Trust it instead of exploring again what it covers; re-read a file only right before you edit it.\n${previous.trim()}\n</previous_handoff>\n\n` : '';
+    const tail = gate?.length ? `\n\nDone means every check below exits 0 when run from the repository root; they are run automatically before you finish. Implement the behavior they describe; do not write code just to satisfy a command.\n${gate.map((c) => `- ${c.text}\n  $ ${c.check}`).join('\n')}` : '';
+    const block = harness?.trim() ? `<task_harness>\n${harness.trim()}\n</task_harness>\n\n` : '';
+    return `${head}${block}${task}${tail}\n\nYou have up to ${this.session.cfg.maxSteps} steps for this task. Call the status tool whenever you want to know how many are left.`;
+  }
+
+  private async gateStatus(): Promise<{ results: CheckResult[]; failed: number }> {
+    const results = await orderedChecks(this.session.cfg.root, this.session.cfg.gate ?? []);
+    return { results, failed: results.filter((r) => !r.pass).length };
+  }
+
+  private async loop(task: string): Promise<string> {
     const { cfg } = this.session;
     const ctx = this.session.context(this.ui, this.files, task);
     this.changed = false;
     this.callCounts.clear();
-    this.reads.clear();
     this.verifiedSinceEdit = true;
-    this.editsPerFile.clear();
     if (this.role === 'main') void this.session.codeIndex.update(this.session.signal).catch(() => undefined);
-    this.provider.addUser(await this.withRecall(task));
+    this.provider.addUser(await this.withRecall(task, this.opening(task)));
+    const gated = this.role === 'main' && Boolean(cfg.gate?.length);
     this.session.log({ agent: this.role, event: 'task', task });
     let reviews = 0;
-    let failures = 0;
-    let idle = 0;
     let scopeChecks = 0;
     let verifyNudges = 0;
     let requirementsChecked = this.role !== 'main';
@@ -114,6 +153,7 @@ export class Agent {
 
     try {
       for (let step = 1; step <= cfg.maxSteps; step++) {
+        this.step = step;
         if (this.session.overBudget()) return `Orçamento de ${cfg.tokenBudget.toLocaleString('pt-BR')} tokens atingido; parei para não gastar além do limite.`;
         const r = await this.provider.step({
           system: this.system,
@@ -136,6 +176,16 @@ export class Agent {
           if (r.stop === 'max_tokens') {
             this.provider.addUser('Your reply was cut off by the output limit. Continue exactly where you stopped.');
             continue;
+          }
+          if (gated) {
+            const { results, failed } = await this.gateStatus();
+            if (failed) {
+              this.ui.info(`portão: ${failed} checagem(ns) falhando; o agente continua`);
+              const message = `[gate] ${results.length - failed}/${results.length} checks pass. ${stepsLeft(cfg.maxSteps, step)} You cannot finish yet. Fix each failing check below (implement the behavior, not code that only satisfies the command), then finish:\n${gateList(results.filter((r) => !r.pass))}`;
+              this.session.log({ agent: this.role, event: 'gate', failed, text: message });
+              this.provider.addUser(message);
+              continue;
+            }
           }
           if (this.role === 'main' && !this.verifiedSinceEdit && verifyNudges < 1 && [...this.touched].some((f) => !isDocFile(f))) {
             verifyNudges++;
@@ -185,7 +235,6 @@ export class Agent {
           return r.text;
         }
 
-        const before = this.mutations;
         const results = await this.execute(r.toolCalls, ctx);
         const conflict = results.find((x) => x.name === 'report_conflict' && !x.isError);
         if (conflict) {
@@ -193,20 +242,6 @@ export class Agent {
           this.ui.warn('o agente sinalizou um conflito com o pedido');
           return conflict.output;
         }
-        failures = results.every((x) => x.isError) ? failures + 1 : 0;
-        idle = this.mutations > before ? 0 : idle + 1;
-        const last = results[results.length - 1]!;
-        if ((this.role === 'main' || this.role === 'worker') && idle >= EXPLORE_BUDGET && (idle - EXPLORE_BUDGET) % EXPLORE_REMINDER_EVERY === 0) {
-          last.output += `\n\n[focus] You have spent ${idle} steps investigating without changing anything. If the user asked a question, answer now with what you already know. If they asked for a change, stop exploring: state your decision in one line and make the first edit now. Do not re-read files whose content you have already seen.`;
-        }
-        if (failures >= FAILURE_STREAK) {
-          last.output +=
-            '\n\n[reflection] Several tool calls in a row have failed. Stop and reconsider: re-read the relevant code and the exact error, question your assumptions, and try a different approach.';
-        }
-        if (this.role === 'main' && step % RECAP_EVERY === 0) {
-          last.output += `\n\n[recap] Step ${step} of ${cfg.maxSteps}. Re-read the original request and keep working on what is still missing; do not stop before every item is done and verified.\n<original_request>\n${task}\n</original_request>`;
-        }
-        if (step === cfg.maxSteps - verifyReserve(cfg.maxSteps)) last.output += `\n\n${budgetWarning(cfg.maxSteps - step, this.touched.size > 0 && !this.verifiedSinceEdit)}`;
         this.provider.addToolResults(results);
         if (this.session.signal.aborted) return 'Interrompido pelo usuário.';
       }
@@ -217,13 +252,22 @@ export class Agent {
     }
   }
 
-  private async withRecall(task: string): Promise<string> {
-    if (this.role !== 'main') return task;
+  private async note(task: string): Promise<string> {
+    this.provider.addUser(HANDOFF_REQUEST(RUN_END));
+    const r = await this.provider.step({ system: this.system, task, changedFiles: [...this.touched], tools: this.tools, signal: this.session.signal, onText: () => undefined, onThinking: () => undefined });
+    this.session.addUsage(r.usage);
+    const plan = this.session.plan.map((p) => `- [${p.status}] ${p.step}`).join('\n');
+    const files = [...new Set([...this.touched, ...(await changedFiles(this.session.cfg.root))])];
+    return `# Handoff\n\n## Plan\n${plan || '(none)'}\n\n## Files changed\n${files.join('\n') || '(none)'}\n\n${r.text.trim()}\n`;
+  }
+
+  private async withRecall(task: string, body: string): Promise<string> {
+    if (this.role !== 'main') return body;
     const memories = await this.session.memory.recall(task, RECALLED, this.session.signal).catch(() => []);
-    if (!memories.length) return task;
+    if (!memories.length) return body;
     this.ui.info(`${memories.length} lembrança(s) relevante(s) recuperada(s) da memória de longo prazo`);
     const block = memories.map((m) => `- [${m.kind}] ${m.text}`).join('\n');
-    return `<recalled_memory>\nPossibly relevant notes from earlier sessions (verify before relying on them):\n${block}\n</recalled_memory>\n\n${task}`;
+    return `<recalled_memory>\nPossibly relevant notes from earlier sessions (verify before relying on them):\n${block}\n</recalled_memory>\n\n${body}`;
   }
 
   private async execute(calls: ToolCall[], ctx: ToolContext): Promise<ToolResult[]> {
@@ -254,7 +298,7 @@ export class Agent {
     if (seen > MAX_IDENTICAL_CALLS && !tool.readOnly) {
       return finish(`Loop guard: this exact ${c.name} call was already made ${seen - 1} times. Repeating it will not change the outcome; change your approach.`, true);
     }
-    if (seen > MAX_IDENTICAL_CALLS) {
+    if (seen > MAX_IDENTICAL_CALLS && c.name !== 'status') {
       return finish(`Loop guard: you already made this exact call ${seen - 1} times and have its result above. Use what you have or try something different.`, true);
     }
     if (c.name === 'report_conflict' && c.input.kind === 'test_contradicts_request' && (this.touched.size === 0 || !this.verifiedSinceEdit)) {
@@ -271,6 +315,13 @@ export class Agent {
       const previous = guarded === null ? null : readIfExists(path.resolve(ctx.root, guarded));
       const blockingBefore = new Set(guarded === null || previous === null ? [] : typeErrors(ctx.root, guarded).filter((e) => e.blocking).map((e) => e.key));
       let output = await tool.run(c.input, ctx);
+      if (!PAGED_TOOLS.includes(c.name)) output = await offload(output, ctx.root, `outputs/${this.session.id}/${c.name}-${c.id.replace(/[^\w-]/g, '')}.txt`);
+      if (c.name === 'skill') {
+        const wanted = (this.session.skills.find((s) => s.name === c.input.name)?.tools ?? []).map(toolKey);
+        const names = this.deferred.filter((t) => wanted.includes(toolKey(t.name)) || wanted.includes(toolKey(t.group ?? ''))).map((t) => t.name);
+        this.enable(names);
+        if (names.length) output += `\n\n[tools] Loaded for this skill: ${names.join(', ')}.`;
+      }
       if (guarded !== null) {
         const introduced = typeErrors(ctx.root, guarded).filter((e) => e.blocking && !blockingBefore.has(e.key));
         if (introduced.length) {
@@ -291,33 +342,19 @@ export class Agent {
           const file = cleanPath(c.input.path);
           const diagnostics = typeDiagnostics(ctx.root, file);
           if (diagnostics) output += `\n\n${diagnostics}`;
-          const edits = (this.editsPerFile.get(file) ?? 0) + 1;
-          this.editsPerFile.set(file, edits);
-          if (edits >= EDIT_LOOP_AT && (edits - EDIT_LOOP_AT) % EDIT_LOOP_EVERY === 0) {
-            output += `\n\n[loop] You have edited ${file} ${edits} times in this task. If you keep adjusting the same thing, stop: re-read the latest error output in full, state which assumption may be wrong, and change approach instead of trying another small variation.`;
-          }
         }
       } else if (c.name === 'run_code' || (c.name === 'bash' && !isReadOnlyCommand(String(c.input.command ?? '')))) {
         this.verifiedSinceEdit = true;
       }
       if (!tool.readOnly) {
         this.changed = true;
-        this.mutations++;
         if (typeof c.input.path === 'string') {
-          this.reads.delete(c.input.path);
           this.touched.add(cleanPath(c.input.path));
         }
       }
       if ((c.name === 'read_file' || c.name === 'edit_file' || c.name === 'write_file') && typeof c.input.path === 'string') {
         const rules = await nestedInstructions(ctx.root, cleanPath(c.input.path), this.instructionsSeen);
         if (rules) output += `\n\n${rules}`;
-      }
-      if (c.name === 'read_file' && typeof c.input.path === 'string') {
-        const times = (this.reads.get(c.input.path) ?? 0) + 1;
-        this.reads.set(c.input.path, times);
-        if (times >= REREAD_WARNING_AT) {
-          output += `\n\n[note] You have read ${c.input.path} ${times} times in this task and it has not changed since. Reuse what you already saw instead of reading it again.`;
-        }
       }
       return finish(output + note, false);
     } catch (e) {

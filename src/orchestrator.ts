@@ -37,7 +37,7 @@ async function untilGreen(session: Session, brief: string, gate: Criterion[], la
   return failed;
 }
 
-async function writeContract(session: Session, goal: string, judge: Judge): Promise<Contract> {
+export async function writeContract(session: Session, goal: string, judge: Judge): Promise<Contract> {
   const draft = await judge.ask<Contract>(contractPrompt(goal), CONTRACT_SCHEMA, READ_TOOLS);
   const baseline = await runChecks(session.cfg.root, draft.slices.flatMap((s) => s.criteria));
   session.ui.info(`contrato com ${draft.slices.length} fatias e ${baseline.length} checagens; validando as checagens no código atual`);

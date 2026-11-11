@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { Agent } from './agent.js';
+import type { Criterion } from './contract.js';
 import { MemoryStore } from './memory.js';
 import { findSkills, type Skill } from './skills.js';
 import type { Role } from './prompts.js';
@@ -38,6 +39,9 @@ export interface Config {
   interactive?: boolean;
   logDir: string | null;
   tools?: string[];
+  handoff?: string;
+  harness?: string;
+  gate?: Criterion[];
 }
 
 const PRICE_PER_MTOK: Record<string, [number, number]> = {

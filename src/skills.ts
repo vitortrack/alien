@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-export type Skill = { name: string; description: string; dir: string };
+export type Skill = { name: string; description: string; dir: string; tools: string[] };
 
 const MAX_DESCRIPTION = 300;
 
@@ -50,7 +50,7 @@ export function findSkills(root: string): Skill[] {
       }
       const { fields } = frontmatter(text);
       const name = fields.name || entry;
-      if (!found.has(name) && fields.description) found.set(name, { name, description: fields.description.slice(0, MAX_DESCRIPTION), dir });
+      if (!found.has(name) && fields.description) found.set(name, { name, description: fields.description.slice(0, MAX_DESCRIPTION), dir, tools: (fields['allowed-tools'] ?? '').split(/[\s,]+/).filter(Boolean) });
     }
   }
   return [...found.values()];

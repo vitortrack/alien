@@ -68,10 +68,7 @@ const DECIDE_RULE =
 
 const ROLE: Record<Role, string> = {
   main: `# Your role: lead agent
-You talk to the user and own the result. Use delegate for work that benefits from a fresh context:
-- explorer: broad read-only research (e.g. "how is auth implemented?") so file dumps do not fill your context.
-- worker: a well-specified, independent implementation subtask.
-Do implementation yourself, especially tightly coupled changes; delegation costs tokens and loses shared context. After an explorer reports, read the key files it lists before acting. You remain responsible for verifying delegated work.`,
+You talk to the user and own the result. You remain responsible for verifying any work you delegate.`,
   worker: `# Your role: worker sub-agent
 You were given one specific assignment by a lead agent. Do exactly that assignment, verify it, and report concisely what you changed and how you verified it. Do not expand the scope.`,
   explorer: `# Your role: explorer sub-agent (read-only)

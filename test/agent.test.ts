@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,7 +13,7 @@ import { systemPrompt } from '../src/prompts.js';
 import { parseInlineToolCalls } from '../src/providers/ollama.js';
 import { bm25, chunkFile, cosine, tokenize } from '../src/rag.js';
 import { Session, type Config } from '../src/session.js';
-import { cleanPath, isDangerous, safePath, suggestPath } from '../src/tools.js';
+import { allTools, cleanPath, isDangerous, safePath, suggestPath } from '../src/tools.js';
 import type { Provider, StepRequest, StepResult, ToolResult } from '../src/types.js';
 import { UI } from '../src/ui.js';
 import { validateInput } from '../src/validate.js';
@@ -34,9 +35,9 @@ class ScriptedProvider implements Provider {
     return { user: this.user, results: this.results };
   }
   restore(state: unknown): void {
-    const s = state as { user: string[]; results: ToolResult[][] };
-    this.user.splice(0, this.user.length, ...s.user);
-    this.results.splice(0, this.results.length, ...s.results);
+    const s = state as { user?: string[]; results?: ToolResult[][] };
+    this.user.splice(0, this.user.length, ...(s.user ?? []));
+    this.results.splice(0, this.results.length, ...(s.results ?? []));
   }
   async step(req: StepRequest): Promise<StepResult> {
     const next = this.script[this.turn++];
@@ -373,18 +374,15 @@ test('system prompt carries the chosen language and the answering method', () =>
   assert.match(systemPrompt('explorer', root, 'en'), /cite locations as path\/to\/file.ts:42/);
 });
 
-test('focus nudge after a long read-only streak and re-read warning on the third read', async () => {
+test('no mid-run nudges: a long streak of reads gets plain tool outputs, with no focus, re-read, recap or budget notes', async () => {
   const root = workspace();
   fs.writeFileSync(path.join(root, 'a.txt'), 'hello\n');
-  const reads = Array.from({ length: 15 }, () => () => call('read_file', { path: 'a.txt', limit: 5 + Math.floor(Math.random() * 1000) }));
+  const reads = Array.from({ length: 32 }, (_, i) => () => call('read_file', { path: 'a.txt', offset: 1 + (i % 2), limit: 5 + i }));
   const provider = new ScriptedProvider([...reads, () => answer('ok')]);
   const ui = UI.create();
-  const session = new Session(config(root, { maxSteps: 30 }), ui, () => provider);
-  await session.run('investigate');
+  await new Session(config(root, { maxSteps: 33 }), ui, () => provider).run('investigate');
   ui.close();
-  assert.match(provider.results[2]![0]!.output, /read a\.txt 3 times/);
-  assert.doesNotMatch(provider.results[13]![0]!.output, /\[focus\]/);
-  assert.match(provider.results[14]![0]!.output, /\[focus\] You have spent 15 steps/);
+  for (const [r] of provider.results) assert.doesNotMatch(r!.output, /\[(focus|note|recap|budget|reflection|loop)\]/);
 });
 
 test('missing paths get cleaned or a suggestion', async () => {
@@ -431,7 +429,7 @@ test('sessions are saved after each task, resumed with their history and forked 
   ui.close();
 });
 
-test('verification gate asks once to run something after unverified code edits; loop note on the 5th edit of a file', async () => {
+test('verification gate asks once to run something after unverified code edits', async () => {
   const root = workspace();
   const ui = UI.create();
   try {
@@ -454,18 +452,6 @@ test('verification gate asks once to run something after unverified code edits; 
     ]);
     assert.equal(await new Session(config(root, { mode: 'auto' }), ui, () => verified).run('mude a'), 'feito e testado');
 
-    const edits = [2, 3, 4, 5, 6].map((n) => () => call('edit_file', { path: 'src/a.js', old_string: `${n}`, new_string: `${n + 1}` }));
-    const looping = new ScriptedProvider([
-      ...edits,
-      ({ results }) => {
-        assert.doesNotMatch(results.at(-2)![0]!.output, /\[loop\]/);
-        assert.match(results.at(-1)![0]!.output, /\[loop\] You have edited src\/a\.js 5 times/);
-        return call('bash', { command: 'node src/a.js' });
-      },
-      () => answer('ok'),
-      () => answer('ok'),
-    ]);
-    assert.equal(await new Session(config(root, { mode: 'auto' }), ui, () => looping).run('ajuste a'), 'ok');
   } finally {
     ui.close();
   }
@@ -542,23 +528,95 @@ test('skills: Claude-compatible SKILL.md discovery, loading on demand, and no to
   }
 });
 
-test('budget: unverified edits get a verification warning with steps still in reserve', async () => {
+test('offload: a huge tool output is saved to a git-ignored file and the model gets head, tail and the path', async () => {
   const root = workspace();
-  const steps: StepResult[] = [call('write_file', { path: 'a.ts', content: 'export const a = 1;\n' })];
-  for (let i = 0; i < 19; i++) steps.push(call('read_file', { path: `missing-${i}.ts` }));
-  let warned = '';
-  const provider = new ScriptedProvider(
-    steps.map((s, i) => ({ results }) => {
-      const out = results.at(-1)?.[0]?.output ?? '';
-      if (out.includes('[budget]')) warned = `${i}|${out}`;
-      return s;
-    }),
-  );
+  execFileSync('git', ['init', '-q'], { cwd: root });
   const ui = UI.create();
-  await new Session(config(root, { maxSteps: 20 }), ui, () => provider).run('add a');
+  try {
+    const provider = new ScriptedProvider([
+      () => call('bash', { command: 'seq 1 50000' }),
+      () => call('bash', { command: 'echo small' }),
+      () => answer('ok'),
+    ]);
+    await new Session(config(root), ui, () => provider).run('liste os números');
+    const big = provider.results[0]![0]!.output;
+    const saved = /saved in (\.trackai\/outputs\/\S+\.txt)/.exec(big)?.[1];
+    assert.ok(saved, big.slice(3000, 3400));
+    assert.ok(big.length < 7000);
+    assert.match(big, /^1\n2\n3\n/);
+    assert.match(big, /50000\n\[exit code 0\]$/);
+    assert.match(big, /grep it or read the lines you need with read_file/);
+    const full = fs.readFileSync(path.join(root, saved), 'utf8');
+    assert.equal(full.split('\n').length, 50001);
+    assert.match(full, /\n25000\n/);
+    assert.equal(provider.results[1]![0]!.output, 'small\n[exit code 0]');
+    assert.equal(execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }), '');
+  } finally {
+    ui.close();
+  }
+});
+
+test('progressive tools: rare tools stay out of the prompt until load_tools or a skill that allows them', async () => {
+  process.env.TRACKAI_USER_SKILLS = 'off';
+  const root = workspace();
+  fs.mkdirSync(path.join(root, '.claude/skills/docs-lookup'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.claude/skills/docs-lookup/SKILL.md'), '---\nname: docs-lookup\ndescription: Use when you need external docs.\nallowed-tools: WebFetch, Bash\n---\nFetch the docs page.\n');
+  const ui = UI.create();
+  const offered: string[][] = [];
+  try {
+    const provider = new ScriptedProvider([
+      () => call('run_code', { language: 'node', code: 'console.log(6 * 7)' }),
+      () => call('load_tools', { group: 'scripts' }),
+      () => call('run_code', { language: 'node', code: 'console.log(6 * 7)' }),
+      () => call('skill', { name: 'docs-lookup' }),
+      () => answer('ok'),
+    ]);
+    const session = new Session(config(root), ui, () => {
+      const wrapped = Object.create(provider) as ScriptedProvider;
+      wrapped.step = (req) => (offered.push(req.tools.map((t) => t.name)), provider.step(req));
+      return wrapped;
+    });
+    await session.run('quanto é 6 vezes 7?');
+    const [first, , third] = provider.results.map((r) => r[0]!);
+    assert.match(first!.output, /^Unknown tool "run_code"\. Available tools: .*\bload_tools\b/);
+    for (const hidden of ['run_code', 'web_fetch', 'remember']) assert.ok(!offered[0]!.includes(hidden), hidden);
+    assert.ok(offered[0]!.includes('semantic_search') && offered[0]!.includes('recall'));
+    assert.match(provider.results[1]![0]!.output, /^Loaded: run_code\./);
+    assert.equal(third!.isError, false);
+    assert.match(third!.output, /^42\n/);
+    assert.match(provider.results[3]![0]!.output, /\[tools\] Loaded for this skill: web_fetch\.$/);
+    assert.ok(offered[4]!.includes('web_fetch') && !offered[4]!.includes('remember'));
+
+    const pinned = new ScriptedProvider([() => answer('ok')]);
+    const seen: string[][] = [];
+    const withList = new Session(config(workspace(), { tools: ['bash', 'run_code'] }), ui, () => {
+      const wrapped = Object.create(pinned) as ScriptedProvider;
+      wrapped.step = (req) => (seen.push(req.tools.map((t) => t.name)), pinned.step(req));
+      return wrapped;
+    });
+    await withList.run('x');
+    assert.deepEqual(seen[0]!.sort(), ['bash', 'run_code', 'status']);
+  } finally {
+    ui.close();
+  }
+});
+
+test('status tool: the opening states the step budget and the agent can ask how many steps are left', async () => {
+  const root = workspace();
+  const provider = new ScriptedProvider([
+    ({ user }) => {
+      assert.match(user[0]!, /You have up to 20 steps for this task\. Call the status tool/);
+      return call('read_file', { path: 'missing.ts' });
+    },
+    () => call('status', {}),
+    ({ results }) => {
+      assert.match(results.at(-1)![0]!.output, /^You have used 2 of your 20 steps \(18 left\)\. Elapsed: \d+ min\. Tokens used: \d+\.$/);
+      return answer('ok');
+    },
+  ]);
+  const ui = UI.create();
+  await new Session(config(root, { maxSteps: 20 }), ui, () => provider).run('look');
   ui.close();
-  assert.match(warned, /^18\|/);
-  assert.match(warned, /Only 2 steps left\. Stop adding new work now: run the type-check/);
 });
 
 test('requirements: after code changes the agent checks every item of the request before finishing', async () => {
@@ -598,22 +656,6 @@ test('report_conflict: without anyone to answer, a question before any edit is r
   ui.close();
 });
 
-test('recap: every 30 steps the original request is shown again', async () => {
-  const root = workspace();
-  const task = 'Do this:\n- item one\n- item two';
-  let recap = '';
-  const steps: Script[] = Array.from({ length: 32 }, (_, i) => ({ results }) => {
-    const out = results.at(-1)?.[0]?.output ?? '';
-    if (out.includes('[recap]')) recap = `${i}|${out}`;
-    return call('read_file', { path: `missing-${i}.ts` });
-  });
-  const ui = UI.create();
-  await new Session(config(root, { maxSteps: 32 }), ui, () => new ScriptedProvider(steps)).run(task);
-  ui.close();
-  assert.match(recap, /^30\|/);
-  assert.ok(recap.includes(`<original_request>\n${task}\n</original_request>`));
-});
-
 const ts5 = process.env.TRACKAI_TEST_TS5;
 test('edits that introduce type errors are reverted; unused names are only reported', { skip: !ts5 && 'set TRACKAI_TEST_TS5 to a typescript@5 folder' }, async () => {
   const root = workspace();
@@ -644,4 +686,71 @@ test('edits that introduce type errors are reverted; unused names are only repor
   } finally {
     ui.close();
   }
+});
+
+test('handoff between runs: the note written at the end of one run opens the next', async () => {
+  const root = workspace();
+  const handoff = path.join(root, 'notes', 'handoff.md');
+  const first = new ScriptedProvider([
+    () => call('write_file', { path: 'a.txt', content: 'v1' }),
+    () => answer('done'),
+    ({ user }) => {
+      assert.match(user.at(-1)!, /^\[handoff\]/);
+      assert.match(user.at(-1)!, /## Tried and failed/);
+      return answer('## State\nnote-body');
+    },
+  ]);
+  let ui = UI.create();
+  assert.equal(await new Session(config(root, { handoff }), ui, () => first).run('block one'), 'done');
+  ui.close();
+  const note = fs.readFileSync(handoff, 'utf8');
+  assert.match(note, /note-body/);
+  assert.match(note, /a\.txt/);
+  const second = new ScriptedProvider([
+    ({ user }) => {
+      assert.match(user[0]!, /<previous_handoff>[\s\S]*note-body[\s\S]*<\/previous_handoff>/);
+      assert.match(user[0]!, /block two\n\nYou have up to/);
+      return answer('ok');
+    },
+    () => answer('## State\nsecond'),
+  ]);
+  ui = UI.create();
+  await new Session(config(root, { handoff }), ui, () => second).run('block two');
+  ui.close();
+  assert.match(fs.readFileSync(handoff, 'utf8'), /second/);
+});
+
+test('gate: the agent sees the checks and is sent back at every turn end while one fails, until they pass', async () => {
+  const root = workspace();
+  const gate = [{ text: 'a.txt says ok', check: 'grep -q ok a.txt && echo fine || { echo "a.txt is wrong"; exit 1; }', guard: false }];
+  const provider = new ScriptedProvider([
+    ({ user }) => {
+      assert.match(user[0]!, /\$ grep -q ok a\.txt/);
+      return call('write_file', { path: 'a.txt', content: 'no' });
+    },
+    () => answer('done'),
+    () => answer('done'),
+    () => answer('done'),
+    ({ user }) => {
+      assert.equal(user.filter((u) => u.startsWith('[gate]')).length, 3);
+      assert.match(user.at(-1)!, /^\[gate\] 0\/1 checks pass\. You have used 4 of your 10 steps \(6 left\)\. You cannot finish yet/);
+      assert.match(user.at(-1)!, /a\.txt is wrong/);
+      return call('write_file', { path: 'a.txt', content: 'ok' });
+    },
+    () => answer('done2'),
+  ]);
+  const ui = UI.create();
+  assert.equal(await new Session(config(root, { gate }), ui, () => provider).run('make a.txt say ok'), 'done2');
+  ui.close();
+});
+
+
+test('tool descriptions state the preconditions and consequences that caused rejected edits', () => {
+  const describe = (name: string) => allTools.find((t) => t.name === name)!.description;
+  assert.match(describe('edit_file'), /reverted/);
+  assert.match(describe('edit_file'), /rename/i);
+  assert.match(describe('edit_file'), /replace_all/);
+  assert.match(describe('write_file'), /reverted/);
+  assert.match(describe('bash'), /does not change any file/);
+  assert.match(describe('bash'), /saved to a file/);
 });

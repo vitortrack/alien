@@ -5,6 +5,8 @@ import { parseArgs } from 'node:util';
 import { bestOf } from './attempts.js';
 import { readMemories } from './memory.js';
 import { orchestrate } from './orchestrator.js';
+import { gateFor } from './gate.js';
+import { claudeJudge } from './contract.js';
 import { LANGUAGE_NAMES, languageName } from './prompts.js';
 import type { Effort } from './providers/anthropic.js';
 import { DEFAULT_EMBED_MODEL, DEFAULT_MODEL, Session, type Config } from './session.js';
@@ -23,6 +25,10 @@ Opções:
       --mode <ask|auto|read-only>    permissão para escrita e bash (padrão: ask)
   -C, --cwd <dir>                    pasta de trabalho (padrão: a atual)
       --orchestrate                  contrato (Claude) → fatias com portão → revisão
+      --gate                         Claude escreve checagens de pronto (uma chamada, sem explorar o repo); o agente só conclui quando passam
+      --gate-file <arquivo>          reaproveita as checagens salvas nesse arquivo (uma vez por card) ou grava as novas nele
+      --harness <arquivo>            texto de harness específico da tarefa (RHI), posto antes do pedido
+      --handoff <arquivo>            lê a nota da execução anterior no início e grava a nota desta no fim
       --attempts <n>                 melhor de N: tentativas isoladas, escolhe a que passa nos testes com o menor diff
       --review                       liga a revisão por um agente crítico (padrão: desligada; a checagem de
                                      escopo e o portão de verificação continuam sempre ativos)
@@ -85,7 +91,7 @@ function validLang(value: string, flag: string): string {
   return value;
 }
 
-function parseConfig(): { cfg: Config; task: string; orchestrateTask: boolean; showThinking: boolean; attempts: number; resumeId: string | undefined; fork: boolean } {
+function parseConfig(): { cfg: Config; task: string; orchestrateTask: boolean; gate: boolean; gateFile: string | undefined; showThinking: boolean; attempts: number; resumeId: string | undefined; fork: boolean } {
   let parsed;
   try {
     parsed = parseArgs({
@@ -97,6 +103,10 @@ function parseConfig(): { cfg: Config; task: string; orchestrateTask: boolean; s
         cwd: { type: 'string', short: 'C' },
         orchestrate: { type: 'boolean' },
         attempts: { type: 'string' },
+        gate: { type: 'boolean' },
+        'gate-file': { type: 'string' },
+        handoff: { type: 'string' },
+        harness: { type: 'string' },
         review: { type: 'boolean' },
         'no-review': { type: 'boolean' },
         'max-steps': { type: 'string' },
@@ -140,9 +150,13 @@ function parseConfig(): { cfg: Config; task: string; orchestrateTask: boolean; s
       interactive: positionals.length === 0,
       lang: validLang(values.lang ?? process.env.TRACKAI_LANG ?? 'pt-BR', '--lang'),
       logDir: values['no-log'] ? null : Session.defaultLogDir(),
+      ...(values.handoff ? { handoff: path.resolve(values.handoff) } : {}),
+      ...(values.harness ? { harness: fs.readFileSync(path.resolve(values.harness), 'utf8') } : {}),
     },
     task: positionals.join(' ').trim(),
     orchestrateTask: Boolean(values.orchestrate),
+    gate: Boolean(values.gate),
+    gateFile: values['gate-file'] ? path.resolve(values['gate-file']) : undefined,
     showThinking: Boolean(values.thinking),
     attempts: Math.max(1, positiveInt(values.attempts, '--attempts', 1)),
     resumeId: values.resume ?? (values.continue ? 'latest' : undefined),
@@ -151,7 +165,7 @@ function parseConfig(): { cfg: Config; task: string; orchestrateTask: boolean; s
 }
 
 async function main(): Promise<void> {
-  const { cfg, task, orchestrateTask, showThinking, attempts, resumeId, fork } = parseConfig();
+  const { cfg, task, orchestrateTask, gate, gateFile, showThinking, attempts, resumeId, fork } = parseConfig();
   const ui = UI.create(showThinking);
   const session = new Session(cfg, ui);
   const resume = (id: string, asFork: boolean): string | null => {
@@ -204,6 +218,16 @@ async function main(): Promise<void> {
   };
 
   if (task) {
+    if (gate && !orchestrateTask) {
+      ui.phase('Portão: checagens de pronto');
+      try {
+        cfg.gate = await gateFor(cfg.root, task, claudeJudge(cfg.root), gateFile);
+        ui.info(`${cfg.gate.length} checagens de pronto escritas pelo motor de decisão`);
+        session.log({ event: 'gate', gate: cfg.gate });
+      } catch (e) {
+        ui.warn(`sem portão: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
     await execute(task, orchestrateTask);
     ui.close();
     return;

@@ -17,6 +17,13 @@ export type PlanStatus = 'pending' | 'in_progress' | 'done';
 export type PlanItem = { step: string; status: PlanStatus };
 export type DelegateRole = 'explorer' | 'worker';
 export type Decision = 'yes' | 'no' | 'always';
+export type ToolGroup = 'web' | 'scripts' | 'memory';
+
+const TOOL_GROUPS: Record<ToolGroup, string> = {
+  web: 'fetches a URL (documentation, APIs)',
+  scripts: 'runs a short Python or Node.js script',
+  memory: 'saves notes for future sessions',
+};
 
 export interface ToolContext {
   readonly root: string;
@@ -36,10 +43,13 @@ export interface ToolContext {
 
 export interface Tool extends ToolSpec {
   readOnly: boolean;
+  group?: ToolGroup;
   run(input: Input, ctx: ToolContext): Promise<string>;
 }
 
 const MAX_OUTPUT = 20_000;
+const OFFLOAD_PREVIEW = 3_000;
+const SCRATCH_DIR = '.trackai';
 const OUTLINE_OVER = 300;
 const WINDOW = 100;
 const GREP_SUMMARY_OVER = 30;
@@ -70,6 +80,38 @@ export function clip(text: string, max = MAX_OUTPUT): string {
   if (text.length <= max) return text;
   const half = Math.floor(max / 2);
   return `${text.slice(0, half)}\n... [${text.length - max} characters omitted] ...\n${text.slice(-half)}`;
+}
+
+export async function writeScratch(root: string, name: string): Promise<{ file: string; write(text: string): Promise<void> }> {
+  const file = path.join(SCRATCH_DIR, name);
+  const abs = path.join(root, file);
+  await fs.mkdir(path.dirname(abs), { recursive: true });
+  await fs.writeFile(path.join(root, SCRATCH_DIR, '.gitignore'), '*\n');
+  return { file, write: (text) => fs.writeFile(abs, text) };
+}
+
+export async function offload(text: string, root: string, name: string): Promise<string> {
+  if (text.length <= MAX_OUTPUT) return text;
+  const scratch = await writeScratch(root, name);
+  await scratch.write(text);
+  const lines = text.split('\n').length;
+  return `${text.slice(0, OFFLOAD_PREVIEW)}\n... [output too long: ${text.length} characters, ${lines} lines. The full output is saved in ${scratch.file}: grep it or read the lines you need with read_file offset/limit instead of running the command again] ...\n${text.slice(-OFFLOAD_PREVIEW)}`;
+}
+
+export function toolLoader(deferred: Tool[], load: (names: string[]) => void): Tool {
+  const groups = [...new Set(deferred.flatMap((t) => (t.group ? [t.group] : [])))];
+  const members = (group: string) => deferred.filter((t) => t.group === group).map((t) => t.name);
+  return {
+    name: 'load_tools',
+    readOnly: true,
+    description: `Load more tools when your plan reaches a step that needs them; they stay available from then on. Groups: ${groups.map((g) => `"${g}" ${TOOL_GROUPS[g]} (${members(g).join(', ')})`).join('; ')}.`,
+    schema: { type: 'object', properties: { group: { type: 'string', enum: groups } }, required: ['group'] },
+    async run(i) {
+      const names = members(str(i, 'group'));
+      load(names);
+      return `Loaded: ${names.join(', ')}. Call them directly from now on.`;
+    },
+  };
 }
 
 export function describeInput(input: Input, max = 80): string {
@@ -197,7 +239,7 @@ function runBash(command: string, ctx: ToolContext, timeoutMs: number): Promise<
     const done = (status: string) => {
       clearTimeout(timer);
       ctx.signal.removeEventListener('abort', onAbort);
-      resolve(clip(`${out.trimEnd() || '(no output)'}\n[${status}]`));
+      resolve(`${out.trimEnd() || '(no output)'}\n[${status}]`);
     };
     child.on('error', (e) => done(`failed to start: ${e.message}`));
     child.on('close', (code, sig) => done(stopped ?? `exit code ${code ?? sig}`));
@@ -383,7 +425,7 @@ export const allTools: Tool[] = [
       try {
         const { stdout } = await execFileP('grep', args, { cwd: ctx.root, maxBuffer: 50_000_000, signal: ctx.signal });
         const lines = stdout.split('\n').filter(Boolean);
-        if (lines.length <= GREP_SUMMARY_OVER) return clip(lines.join('\n'));
+        if (lines.length <= GREP_SUMMARY_OVER) return lines.join('\n');
         const byFile = new Map<string, { count: number; first: string }>();
         for (const line of lines) {
           const file = line.slice(0, line.indexOf(':'));
@@ -393,7 +435,7 @@ export const allTools: Tool[] = [
         }
         const files = [...byFile].slice(0, 100).map(([file, e]) => `${file} (${e.count}): ${e.first}`);
         const more = byFile.size > 100 ? `\n... ${byFile.size - 100} more files` : '';
-        return clip(`${lines.length} matches in ${byFile.size} files; per file: count and first match. Narrow with path/include, or read the range you need:\n${files.join('\n')}${more}`);
+        return `${lines.length} matches in ${byFile.size} files; per file: count and first match. Narrow with path/include, or read the range you need:\n${files.join('\n')}${more}`;
       } catch (e) {
         if ((e as { code?: unknown }).code === 1) return 'No matches.';
         throw e;
@@ -404,7 +446,7 @@ export const allTools: Tool[] = [
     name: 'write_file',
     readOnly: false,
     description:
-      'Create a new file, or completely rewrite one you have already read. Creates parent directories. For changes to existing files prefer edit_file.',
+      'Create a new file, or completely rewrite one you have already read. Creates parent directories. For changes to existing files prefer edit_file. If the new content has errors the type checker can see in that file alone (missing import, undeclared name, broken syntax), the write is reverted and the errors are returned: include every import and declaration the file needs in the same write.',
     schema: {
       type: 'object',
       properties: {
@@ -431,7 +473,7 @@ export const allTools: Tool[] = [
     name: 'edit_file',
     readOnly: false,
     description:
-      'Replace text in a file you have read. old_string should be copied from read_file output (without the line-number prefix) and identify exactly one place; include a few surrounding lines when needed. Small whitespace/indentation differences are tolerated, and CRLF line endings and tab indentation are preserved automatically. Set replace_all=true to change every occurrence. Returns the edited region with line numbers so you can check it.',
+      'Replace text in a file you have read. old_string should be copied from read_file output (without the line-number prefix) and identify exactly one place; include a few surrounding lines when needed. Small whitespace/indentation differences are tolerated, and CRLF line endings and tab indentation are preserved automatically. Set replace_all=true to change every occurrence. Returns the edited region with line numbers so you can check it. Precondition checked after every edit: if the edit leaves errors the type checker can see in that file alone, it is reverted and the file stays unchanged. So to rename a name, change its declaration and every use in the file in the same call (replace_all=true on the name), never the declaration alone; to add a call to something new, add its import in the same edit or first.',
     schema: {
       type: 'object',
       properties: {
@@ -466,7 +508,7 @@ export const allTools: Tool[] = [
     name: 'bash',
     readOnly: false,
     description:
-      'Run a shell command in the workspace root (non-interactive, no stdin). Use it to build, test, type-check, run git, or inspect the system. Output is truncated when long.',
+      'Run a shell command in the workspace root (non-interactive, no stdin). Use it to build, test, type-check, run git, or inspect the system. Reading with cat, sed, grep or ls does not change any file, so it is not progress on the task: write the change with edit_file or write_file. Long output is saved to a file under .trackai/ and you get its head, tail and path: grep or page that file instead of running the command again.',
     schema: {
       type: 'object',
       properties: {
@@ -483,6 +525,7 @@ export const allTools: Tool[] = [
   {
     name: 'web_fetch',
     readOnly: true,
+    group: 'web',
     description: 'Fetch a public http(s) URL and return its content as plain text (HTML is stripped). Useful for docs.',
     schema: {
       type: 'object',
@@ -498,7 +541,7 @@ export const allTools: Tool[] = [
       });
       const body = await res.text();
       const text = (res.headers.get('content-type') ?? '').includes('html') ? htmlToText(body) : body;
-      return clip(`HTTP ${res.status} ${url.href}\n\n${text}`);
+      return `HTTP ${res.status} ${url.href}\n\n${text}`;
     },
   },
   {
@@ -573,12 +616,13 @@ export const allTools: Tool[] = [
       const body = hits
         .map((h) => `── ${h.file}:${h.start}-${h.end} (score ${h.score.toFixed(2)})\n${h.text.split('\n').slice(0, 25).join('\n')}`)
         .join('\n\n');
-      return clip(`Search mode: ${mode}\n\n${body}`);
+      return `Search mode: ${mode}\n\n${body}`;
     },
   },
   {
     name: 'run_code',
     readOnly: false,
+    group: 'scripts',
     description:
       'Execute a short Python or Node.js (ES module) script with the workspace root as working directory, so relative paths and imports like ./src/x.js resolve against the project. Returns its output. Use it for calculations, data analysis, parsing files or quick experiments.',
     schema: {
@@ -632,6 +676,7 @@ export const allTools: Tool[] = [
   {
     name: 'remember',
     readOnly: true,
+    group: 'memory',
     description:
       'Save something to long-term memory (vector store, kept outside the workspace) so future sessions can recall it. kind "fact": stable project knowledge (conventions, commands, architecture, user preferences). kind "lesson": a mistake or insight worth not repeating. Never store secrets.',
     schema: {

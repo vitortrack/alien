@@ -1301,3 +1301,44 @@ assert.equal(handle('POST', '/vehicles/99/retire').status, 404, 'unknown vehicle
     },
   },
 ];
+
+const NOISY_TEST = `import assert from 'node:assert/strict';
+import { formatBRL } from './src/money.js';
+
+let failed = 0;
+for (let i = 1; i <= 20000; i++) {
+  console.log(\`ok \${i} - parcela \${i} gerada em \${formatBRL(i % 900)}\`);
+  if (i === 11873) {
+    try {
+      assert.equal(formatBRL(1234.5), 'R$ 1.234,50');
+    } catch (e) {
+      failed++;
+      console.log(\`not ok \${i} - formatBRL(1234.5): \${e.message.split('\\n')[0]}\`);
+    }
+  }
+}
+console.log(\`# fim: \${failed} falha(s)\`);
+process.exit(failed ? 1 : 0);
+`;
+
+export const harnessScenarios: Scenario[] = [
+  {
+    id: 'harness-buried-failure',
+    kind: 'bug',
+    files: {
+      'package.json': PKG,
+      'src/money.js': "export function formatBRL(value) {\n  return 'R$ ' + value.toFixed(2).replace('.', ',');\n}\n",
+      'test.mjs': NOISY_TEST,
+    },
+    task: 'O `npm test` termina com falha. Descubra qual verificação falha e corrija o código (o teste está certo, não mexa nele).',
+    check: (dir) =>
+      all(
+        fs.readFileSync(path.join(dir, 'test.mjs'), 'utf8') === NOISY_TEST ? { pass: true, detail: 'test untouched' } : { pass: false, detail: 'test.mjs was edited' },
+        runNode(
+          dir,
+          `import assert from 'node:assert/strict'; import { formatBRL } from './src/money.js';
+assert.equal(formatBRL(1234.5), 'R$ 1.234,50'); assert.equal(formatBRL(1000000), 'R$ 1.000.000,00'); assert.equal(formatBRL(5), 'R$ 5,00'); assert.equal(formatBRL(999.999), 'R$ 1.000,00');`,
+        ),
+      ),
+  },
+];
