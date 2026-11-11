@@ -55,8 +55,13 @@ export interface StepRequest {
   onThinking(delta: string): void;
 }
 
+export interface Image {
+  mime: string;
+  data: string;
+}
+
 export interface Provider {
-  addUser(text: string): void;
+  addUser(text: string, images?: Image[]): void;
   addToolResults(results: ToolResult[]): void;
   step(req: StepRequest): Promise<StepResult>;
   snapshot(): unknown;

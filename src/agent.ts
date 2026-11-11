@@ -5,7 +5,7 @@ import { isJudged, orderedChecks } from './gate.js';
 import { agentJudge } from './judge.js';
 import type { Session } from './session.js';
 import { allTools, cleanPath, describeInput, offload, permit, suggestPath, toolLoader, type Tool, type ToolContext } from './tools.js';
-import type { Provider, ToolCall, ToolResult } from './types.js';
+import type { Image, Provider, ToolCall, ToolResult } from './types.js';
 import type { AgentUI } from './agent-ui.js';
 import { validateInput } from './validate.js';
 import fs from 'node:fs';
@@ -109,8 +109,8 @@ export class Agent {
     return this.systemCache.text;
   }
 
-  async run(task: string): Promise<string> {
-    const out = await this.loop(task);
+  async run(task: string, images: Image[] = []): Promise<string> {
+    const out = await this.loop(task, images);
     const file = this.role === 'main' ? this.session.cfg.handoff : undefined;
     if (file && !this.session.signal.aborted) {
       fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -139,14 +139,14 @@ export class Agent {
     return { results, failed: results.filter((r) => !r.pass).length };
   }
 
-  private async loop(task: string): Promise<string> {
+  private async loop(task: string, images: Image[] = []): Promise<string> {
     const { cfg } = this.session;
     const ctx = this.session.context(this.ui, this.files, task);
     this.changed = false;
     this.callCounts.clear();
     this.verifiedSinceEdit = true;
     if (this.role === 'main') void this.session.codeIndex.update(this.session.signal).catch(() => undefined);
-    this.provider.addUser(await this.withRecall(task, this.opening(task)));
+    this.provider.addUser(await this.withRecall(task, this.opening(task)), images);
     const gated = this.role === 'main' && Boolean(cfg.gate?.length);
     this.session.log({ agent: this.role, event: 'task', task });
     let reviews = 0;

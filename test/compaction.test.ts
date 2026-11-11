@@ -64,3 +64,26 @@ test('observations older than the last 10 are masked in blocks of 10, so the pre
   await provider.step(req);
   assert.equal(masked(), 10);
 });
+
+test('images go to the model only when it has vision; the history keeps them for a later vision model', async () => {
+  const sent: { images?: string[] }[][] = [];
+  const stub = (capabilities: string[]) => {
+    globalThis.fetch = (async (url: string, init: { body: string }) => {
+      if (url.endsWith('/api/show')) return new Response(JSON.stringify({ capabilities }));
+      sent.push((JSON.parse(init.body) as { messages: { images?: string[] }[] }).messages);
+      return new Response(`${JSON.stringify({ message: { content: 'ok' }, done: true, prompt_eval_count: 1, eval_count: 1 })}\n`);
+    }) as typeof fetch;
+  };
+  const req: StepRequest = { system: 's', tools: [], signal: new AbortController().signal, onText: () => {}, onThinking: () => {} };
+  stub(['completion', 'vision']);
+  const seeing = new OllamaProvider('glm:cloud', 1000);
+  seeing.addUser('what is in the print?', [{ mime: 'image/png', data: 'aGVsbG8=' }]);
+  await seeing.step(req);
+  assert.deepEqual(sent.at(-1)![1]!.images, ['aGVsbG8=']);
+  stub(['completion']);
+  const blind = new OllamaProvider('qwen3:8b', 1000);
+  blind.restore(seeing.snapshot());
+  await blind.step(req);
+  assert.equal(sent.at(-1)![1]!.images, undefined);
+  assert.deepEqual((blind.snapshot() as { history: { images?: string[] }[] }).history[0]!.images, ['aGVsbG8=']);
+});

@@ -467,6 +467,27 @@ details.obs pre {
   border-top: 1px solid var(--vscode-panel-border);
 }
 
+#attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+#attachments .chip {
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 0.85em;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+}
+
+#attachments .remove {
+  padding: 0 4px;
+  background: transparent;
+  color: inherit;
+}
+
 #input {
   width: 100%;
   resize: vertical;

@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { Provider, StepRequest, StepResult, ToolResult } from '../types.js';
+import type { Image, Provider, StepRequest, StepResult, ToolResult } from '../types.js';
 
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
@@ -12,8 +12,13 @@ export class AnthropicProvider implements Provider {
     private readonly effort: Effort,
   ) {}
 
-  addUser(text: string): void {
-    this.history.push({ role: 'user', content: text });
+  addUser(text: string, images: Image[] = []): void {
+    if (!images.length) {
+      this.history.push({ role: 'user', content: text });
+      return;
+    }
+    const blocks = images.map((i) => ({ type: 'image' as const, source: { type: 'base64' as const, media_type: i.mime as 'image/png', data: i.data } }));
+    this.history.push({ role: 'user', content: [...blocks, { type: 'text', text }] });
   }
 
   snapshot(): unknown {

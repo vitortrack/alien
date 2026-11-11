@@ -12,6 +12,26 @@
   const best3 = $('best3');
   const working = $('working');
   const modelSel = $('model');
+  const fileInput = $('file');
+  const attachBtn = $('attach');
+  const attachEl = $('attachments');
+  let attached = [];
+
+  function renderAttachments() {
+    attachEl.hidden = !attached.length;
+    attachEl.innerHTML = attached.map((a, i) => `<span class="chip">${esc(a.name)} <button type="button" class="remove" data-i="${i}" aria-label="Remover ${esc(a.name)}">×</button></span>`).join('');
+  }
+
+  function attach(files) {
+    for (const file of files) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        attached.push({ name: file.name || 'print.png', mime: file.type, data: String(reader.result).split(',')[1] ?? '' });
+        renderAttachments();
+      };
+      reader.readAsDataURL(file);
+    }
+  }
 
 
   const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -429,12 +449,15 @@
 
   function send() {
     const text = input.value.trim();
-    if (!text || sendBtn.disabled) return;
+    if ((!text && !attached.length) || sendBtn.disabled) return;
     messages.querySelector('.welcome')?.remove();
     stick = true;
-    add('msg user', esc(text).replace(/\n/g, '<br>'));
-    vscode.postMessage({ type: 'send', text, orchestrate: orchestrate.checked, best3: best3.checked });
+    const names = attached.length ? `<div class="muted">📎 ${attached.map((a) => esc(a.name)).join(', ')}</div>` : '';
+    add('msg user', esc(text).replace(/\n/g, '<br>') + names);
+    vscode.postMessage({ type: 'send', text, orchestrate: orchestrate.checked, best3: best3.checked, attachments: attached });
     input.value = '';
+    attached = [];
+    renderAttachments();
   }
 
   form.addEventListener('submit', (e) => {
@@ -448,6 +471,28 @@
     }
   });
   stopBtn.addEventListener('click', () => vscode.postMessage({ type: 'stop' }));
+  attachBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    attach(fileInput.files);
+    fileInput.value = '';
+  });
+  attachEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('.remove');
+    if (!btn) return;
+    attached.splice(Number(btn.dataset.i), 1);
+    renderAttachments();
+  });
+  input.addEventListener('paste', (e) => {
+    const files = [...(e.clipboardData?.files ?? [])];
+    if (!files.length) return;
+    e.preventDefault();
+    attach(files);
+  });
+  form.addEventListener('dragover', (e) => e.preventDefault());
+  form.addEventListener('drop', (e) => {
+    e.preventDefault();
+    attach(e.dataTransfer?.files ?? []);
+  });
   modelSel.addEventListener('change', () => vscode.postMessage({ type: 'setModel', model: modelSel.value }));
   messages.addEventListener('click', (e) => {
     const ref = e.target.closest('a.ref');

@@ -12,7 +12,7 @@ import { CodeIndex, Embedder } from './rag.js';
 import { workspaceDiff } from './scope.js';
 import { newSessionId, SessionStore, type SavedSession, type Turn } from './sessions.js';
 import { allowsTestEdits, clip, type Mode, type PlanItem, type ToolContext } from './tools.js';
-import type { Provider, Usage } from './types.js';
+import type { Provider, Usage, Image } from './types.js';
 import type { AgentUI } from './agent-ui.js';
 
 export type ProviderName = 'ollama' | 'anthropic';
@@ -182,9 +182,9 @@ export class Session {
     return { approved: !/CHANGES_REQUESTED/.test(feedback), feedback };
   }
 
-  run(task: string): Promise<string> {
+  run(task: string, images: Image[] = []): Promise<string> {
     return this.track(async () => {
-      const answer = await this.main.run(task);
+      const answer = await this.main.run(task, images);
       this.turns.push({ task, answer });
       this.save();
       return answer;

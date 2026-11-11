@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Provider, StepRequest, StepResult, ToolCall, ToolResult, ToolSpec, Usage } from '../types.js';
+import type { Provider, StepRequest, StepResult, ToolCall, ToolResult, ToolSpec, Usage, Image } from '../types.js';
 
 type OllamaToolCall = { function: { name: string; arguments: Record<string, unknown> | string } };
 
@@ -8,6 +8,7 @@ type OllamaMessage = {
   content: string;
   tool_calls?: OllamaToolCall[];
   tool_name?: string;
+  images?: string[];
 };
 
 type OllamaChunk = {
@@ -65,7 +66,7 @@ export function parseInlineToolCalls(text: string, toolNames: Set<string>): Olla
 
 export class OllamaProvider implements Provider {
   private history: OllamaMessage[] = [];
-  private info: { thinking: boolean; ctx: number } | undefined;
+  private info: { thinking: boolean; vision: boolean; ctx: number } | undefined;
   private lastPromptTokens = 0;
 
   constructor(
@@ -74,8 +75,8 @@ export class OllamaProvider implements Provider {
     private readonly host = process.env.OLLAMA_HOST ?? 'http://localhost:11434',
   ) {}
 
-  addUser(text: string): void {
-    this.history.push({ role: 'user', content: text });
+  addUser(text: string, images: Image[] = []): void {
+    this.history.push({ role: 'user', content: text, ...(images.length ? { images: images.map((i) => i.data) } : {}) });
   }
 
   snapshot(): unknown {
@@ -94,14 +95,14 @@ export class OllamaProvider implements Provider {
   }
 
   async step(req: StepRequest): Promise<StepResult> {
-    const { thinking: think, ctx } = await this.modelInfo(req.signal);
+    const { thinking: think, vision, ctx } = await this.modelInfo(req.signal);
     const compacted = this.lastPromptTokens > compactAt(ctx) && (await this.compact(req.signal, ctx, req.task, req.changedFiles ?? []));
     const res = await this.post(
       {
         model: this.model,
         stream: true,
         ...(think ? { think: true } : {}),
-        messages: [{ role: 'system', content: req.system }, ...this.withElidedObservations()],
+        messages: [{ role: 'system', content: req.system }, ...this.withElidedObservations().map(({ images, ...m }) => (vision && images ? { ...m, images } : m))],
         tools: req.tools.map((t: ToolSpec) => ({
           type: 'function',
           function: { name: t.name, description: t.description, parameters: t.schema },
@@ -194,7 +195,7 @@ export class OllamaProvider implements Provider {
     if (buffer.trim()) yield JSON.parse(buffer) as OllamaChunk;
   }
 
-  private async modelInfo(signal: AbortSignal): Promise<{ thinking: boolean; ctx: number }> {
+  private async modelInfo(signal: AbortSignal): Promise<{ thinking: boolean; vision: boolean; ctx: number }> {
     if (this.info) return this.info;
     try {
       const res = await fetch(`${this.host}/api/show`, {
@@ -207,10 +208,10 @@ export class OllamaProvider implements Provider {
       const native = Object.entries(info.model_info ?? {}).find(([k]) => k.endsWith('.context_length'))?.[1];
       const remote = Boolean(info.remote_host) || /cloud/.test(this.model);
       const ctx = remote && typeof native === 'number' ? Math.min(native, CLOUD_CTX_CAP) : remote ? CLOUD_CTX_CAP : this.numCtx;
-      this.info = { thinking: info.capabilities?.includes('thinking') ?? false, ctx };
+      this.info = { thinking: info.capabilities?.includes('thinking') ?? false, vision: info.capabilities?.includes('vision') ?? false, ctx };
     } catch (e) {
       if (signal.aborted) throw e;
-      this.info = { thinking: false, ctx: this.numCtx };
+      this.info = { thinking: false, vision: false, ctx: this.numCtx };
     }
     return this.info;
   }

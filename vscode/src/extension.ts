@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 import * as vscode from 'vscode';
 import type { AgentUI } from '../../src/agent-ui.js';
@@ -8,6 +9,7 @@ import { DEFAULT_EMBED_MODEL, DEFAULT_MODEL, Session, type Config, type Provider
 import { SessionStore } from '../../src/sessions.js';
 import { THINKING_WORDS } from '../../src/thinking-words.js';
 import type { Decision, Mode, PlanItem } from '../../src/tools.js';
+import type { Image } from '../../src/types.js';
 
 type Message = Record<string, unknown>;
 type Post = (message: Message) => void;
@@ -110,6 +112,29 @@ function readConfig(root: string): Config {
 
 const OPEN_SESSION = 'trackai.openSession';
 
+type Attachment = { name: string; mime: string; data: string };
+
+function saveAttachments(root: string, list: Attachment[]): { lines: string[]; images: Image[] } {
+  const dir = path.join(root, '.trackai', 'attachments');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, '.gitignore'), '*\n');
+  const lines = list.map((a) => {
+    const file = path.join(dir, `${Date.now()}-${path.basename(a.name).replace(/[^\w.-]/g, '_')}`);
+    fs.writeFileSync(file, Buffer.from(a.data, 'base64'));
+    return `- ${path.relative(root, file)} (${a.mime || 'tipo desconhecido'})`;
+  });
+  return { lines, images: list.filter((a) => a.mime.startsWith('image/')).map((a) => ({ mime: a.mime, data: a.data })) };
+}
+
+async function hasVision(model: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${process.env.OLLAMA_HOST}/api/show`, { method: 'POST', body: JSON.stringify({ model }) });
+    return ((await res.json()) as { capabilities?: string[] }).capabilities?.includes('vision') ?? false;
+  } catch {
+    return false;
+  }
+}
+
 async function localModels(current: string): Promise<string[]> {
   try {
     const res = await fetch(`${process.env.OLLAMA_HOST}/api/tags`);
@@ -168,8 +193,11 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
   <div id="working" hidden></div>
 </main>
 <form id="composer">
-  <textarea id="input" rows="3" placeholder="Pergunte ou peça uma tarefa…"></textarea>
+  <div id="attachments" hidden></div>
+  <textarea id="input" rows="3" placeholder="Pergunte ou peça uma tarefa… (cole um print com Ctrl+V ou arraste arquivos)"></textarea>
   <div class="actions">
+    <input type="file" id="file" multiple hidden>
+    <button type="button" id="attach" class="secondary" title="Anexar arquivos ou imagens" aria-label="Anexar arquivos">📎</button>
     <label class="toggle"><input type="checkbox" id="orchestrate"> multiagente</label>
     <label class="toggle" title="Roda 3 tentativas isoladas e aplica a que passa nos testes com o menor diff (3× mais tokens)"><input type="checkbox" id="best3"> melhor de 3</label>
     <span class="spacer"></span>
@@ -239,7 +267,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
       case 'setModel':
         return this.setModel(String(m.model ?? ''));
       case 'send':
-        return this.send(String(m.text ?? ''), m.orchestrate === true, m.best3 === true);
+        return this.send(String(m.text ?? ''), m.orchestrate === true, m.best3 === true, Array.isArray(m.attachments) ? (m.attachments as Attachment[]) : []);
       case 'stop':
         this.session?.abort();
         return;
@@ -265,14 +293,19 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
     this.post({ type: 'status', text: `${cfg.provider} · ${cfg.model} · ${cfg.mode}` });
   }
 
-  private async send(text: string, viaOrchestrator: boolean, best3: boolean): Promise<void> {
-    const task = text.trim();
-    if (!task) return;
+  private async send(text: string, viaOrchestrator: boolean, best3: boolean, attachments: Attachment[]): Promise<void> {
+    let task = text.trim();
+    if (!task && !attachments.length) return;
     const session = this.ensureSession();
     if (!session) return;
     if (session.busy) {
       this.post({ type: 'warn', message: 'Aguarde a tarefa atual terminar ou clique em Parar.' });
       return;
+    }
+    const { lines, images } = saveAttachments(session.cfg.root, attachments);
+    if (lines.length) task = `${task || 'Analise os arquivos anexados.'}\n\nFiles attached by the user (read them; images are also shown to you when the model has vision; for a PDF run: pdftotext <file> -):\n${lines.join('\n')}`;
+    if (images.length && session.cfg.provider === 'ollama' && !(await hasVision(session.cfg.model))) {
+      this.post({ type: 'warn', message: `O modelo ${session.cfg.model} não lê imagens: ele recebe só o caminho do arquivo. Para interpretar o print, escolha um modelo com visão no seletor (ex.: glm-5.3-flash:cloud).` });
     }
     this.post({ type: 'status', text: `${session.cfg.provider} · ${session.cfg.model} · ${session.cfg.mode}` });
     this.post({ type: 'busy', value: true });
@@ -288,7 +321,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
         session.addUsage(result.usage);
         out = result.answer;
       } else {
-        out = await session.run(task);
+        out = await session.run(task, images);
         void this.state.update(OPEN_SESSION, session.id);
       }
       if (STOP_PREFIXES.some((p) => out.startsWith(p))) report = { type: 'warn', message: out };
