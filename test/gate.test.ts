@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import type { Criterion, Judge } from '../src/contract.js';
-import { gateFor, orderedChecks } from '../src/gate.js';
+import { gateFor, MINIMAL_DIFF, orderedChecks } from '../src/gate.js';
 import { digest } from '../src/rhi.js';
 
 function repo(): string {
@@ -41,7 +41,7 @@ test('gate: written in one call from the request and the file list, without tool
   const j = judge({ slices: [{ title: 'all', spec: '', files: [], criteria: checks }] });
   const file = path.join(root, '.trackai', 'gate.json');
   const gate = await gateFor(root, 'make a.txt say new', j, file);
-  assert.deepEqual(gate.map((c) => c.text), ['a.txt says new', 'build passes']);
+  assert.deepEqual(gate.map((c) => c.text), ['a.txt says new', 'build passes', MINIMAL_DIFF.text]);
   assert.deepEqual(j.tools[0], []);
   assert.match(j.prompts[0]!, /make a\.txt say new/);
   assert.match(j.prompts[0]!, /\ba\.txt\b/);
@@ -92,4 +92,21 @@ test('gate: the project instructions go into the prompt so rules like "every cha
   const j = judge({ slices: [{ title: 'all', spec: '', files: [], criteria: [] }] });
   await gateFor(root, 'make a.txt say new', j);
   assert.match(j.prompts[0]!, /<project_instructions>[\s\S]*testes de todos os cenários/);
+  assert.match(j.prompts[0]!, /must allow test files/);
+});
+
+test('gate: the minimal-diff judge runs last, only after every command check passes, and its reason comes back', async () => {
+  const root = repo();
+  const gate: Criterion[] = [{ text: 'a.txt says new', check: 'grep -q new a.txt', guard: false }, MINIMAL_DIFF];
+  const j = judge({ pass: false, reason: 'remove the helper file' });
+  const before = await orderedChecks(root, gate, { request: 'make a.txt say new', judge: j });
+  assert.equal(j.prompts.length, 0);
+  assert.deepEqual(before.map((r) => r.pass), [false]);
+  fs.writeFileSync(path.join(root, 'a.txt'), 'new\n');
+  const after = await orderedChecks(root, gate, { request: 'make a.txt say new', judge: j });
+  assert.deepEqual(after.map((r) => r.pass), [true, false]);
+  assert.equal(after[1]!.output, 'remove the helper file');
+  assert.match(j.prompts[0]!, /make a\.txt say new[\s\S]*smallest change/);
+  assert.deepEqual(j.tools[0], []);
+  assert.deepEqual((await orderedChecks(root, gate)).map((r) => r.pass), [true]);
 });

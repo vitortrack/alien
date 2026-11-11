@@ -1,7 +1,8 @@
 import { systemPrompt, type Role } from './prompts.js';
 import { changedFiles, nestedInstructions, scopeReport, workspaceDiff } from './scope.js';
 import type { CheckResult } from './contract.js';
-import { orderedChecks } from './gate.js';
+import { isJudged, orderedChecks } from './gate.js';
+import { agentJudge } from './judge.js';
 import type { Session } from './session.js';
 import { allTools, cleanPath, describeInput, offload, permit, suggestPath, toolLoader, type Tool, type ToolContext } from './tools.js';
 import type { Provider, ToolCall, ToolResult } from './types.js';
@@ -51,6 +52,8 @@ const readIfExists = (file: string): string | null => {
   }
 };
 const isDocFile = (f: string): boolean => /\.(md|mdx|txt|rst)$/i.test(f);
+
+const MAX_JUDGE_REJECTIONS = 2;
 
 export class Agent {
   private readonly provider: Provider;
@@ -127,8 +130,12 @@ export class Agent {
     return `${head}${block}${task}${tail}\n\nYou have up to ${this.session.cfg.maxSteps} steps for this task. Call the status tool whenever you want to know how many are left.`;
   }
 
-  private async gateStatus(): Promise<{ results: CheckResult[]; failed: number }> {
-    const results = await orderedChecks(this.session.cfg.root, this.session.cfg.gate ?? []);
+  private judgeRejections = 0;
+
+  private async gateStatus(task: string): Promise<{ results: CheckResult[]; failed: number }> {
+    const judged = this.judgeRejections < MAX_JUDGE_REJECTIONS ? { request: task, judge: agentJudge(this.session) } : undefined;
+    const results = await orderedChecks(this.session.cfg.root, this.session.cfg.gate ?? [], judged);
+    if (results.some((r) => !r.pass && isJudged(r.criterion))) this.judgeRejections++;
     return { results, failed: results.filter((r) => !r.pass).length };
   }
 
@@ -178,7 +185,7 @@ export class Agent {
             continue;
           }
           if (gated) {
-            const { results, failed } = await this.gateStatus();
+            const { results, failed } = await this.gateStatus(task);
             if (failed) {
               this.ui.info(`portão: ${failed} checagem(ns) falhando; o agente continua`);
               const message = `[gate] ${results.length - failed}/${results.length} checks pass. ${stepsLeft(cfg.maxSteps, step)} You cannot finish yet. Fix each failing check below (implement the behavior, not code that only satisfies the command), then finish:\n${gateList(results.filter((r) => !r.pass))}`;

@@ -745,6 +745,27 @@ test('gate: the agent sees the checks and is sent back at every turn end while o
 });
 
 
+test('gate: the minimal-diff judge can send the agent back at most twice, then stops blocking', async () => {
+  const root = workspace();
+  const { MINIMAL_DIFF } = await import('../src/gate.js');
+  const gate = [{ text: 'a.txt says ok', check: 'grep -q ok a.txt', guard: false }, MINIMAL_DIFF];
+  const main = new ScriptedProvider([
+    () => call('write_file', { path: 'a.txt', content: 'ok' }),
+    () => answer('done'),
+    ({ user }) => {
+      assert.match(user.at(-1)!, /^\[gate\] 1\/2 checks pass[\s\S]*drop the helper/);
+      return answer('done');
+    },
+    () => answer('done'),
+  ]);
+  let judged = 0;
+  const factory = () => (judged++ === 0 ? main : new ScriptedProvider([() => answer('{"pass":false,"reason":"drop the helper"}')]));
+  const ui = UI.create();
+  assert.equal(await new Session(config(root, { gate }), ui, factory).run('make a.txt say ok'), 'done');
+  ui.close();
+  assert.equal(judged - 1, 2);
+});
+
 test('tool descriptions state the preconditions and consequences that caused rejected edits', () => {
   const describe = (name: string) => allTools.find((t) => t.name === name)!.description;
   assert.match(describe('edit_file'), /reverted/);
