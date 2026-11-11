@@ -76,6 +76,17 @@ export function isDangerous(command: string): boolean {
   return DANGEROUS.some((re) => re.test(command));
 }
 
+const SECRETS: RegExp[] = [
+  /\b(cat|less|more|head|tail|grep|rg|sed|awk|cut|source|cp|base64|xxd|strings)\b[^|;&\n]*\.env(?![\w.-]*example)\b/,
+  /(^|[\s;&(])(\.|<)\s*\S*\.env(?![\w.-]*example)\b/,
+  /\bdocker\s+(inspect|exec)\b[^\n]*\benv\b/i,
+  /\bprintenv\b/,
+];
+
+export function readsSecrets(text: string): boolean {
+  return SECRETS.some((re) => re.test(text));
+}
+
 export function clip(text: string, max = MAX_OUTPUT): string {
   if (text.length <= max) return text;
   const half = Math.floor(max / 2);
@@ -180,9 +191,10 @@ function permissionScope(tool: Tool, input: Input): { key: string; label: string
 }
 
 export async function permit(tool: Tool, input: Input, ctx: ToolContext): Promise<string | null> {
-  if (tool.readOnly) return null;
   const command = tool.name === 'bash' ? str(input, 'command') : '';
-  const danger = command !== '' && isDangerous(command);
+  const secret = readsSecrets(command || `cat ${str(input, 'path')}`);
+  if (tool.readOnly && !secret) return null;
+  const danger = secret || (command !== '' && isDangerous(command));
   if (command && !danger && isReadOnlyCommand(command)) return null;
   if (ctx.mode === 'read-only') {
     return `Permission denied: "${tool.name}" is not allowed in read-only mode. Continue with read-only tools and describe the change instead.`;
@@ -190,12 +202,13 @@ export async function permit(tool: Tool, input: Input, ctx: ToolContext): Promis
   if (ctx.mode === 'auto' && !danger) return null;
   const scope = permissionScope(tool, input);
   if (!danger && ctx.allowed.has(scope.key)) return null;
-  const prefix = danger ? '⚠ comando potencialmente destrutivo — ' : '';
-  const decision = await ctx.confirm(`${prefix}Permitir ${tool.name} ${describeInput(input, 200)}?`, danger ? undefined : scope.label);
+  let prefix = danger ? '⚠ comando potencialmente destrutivo — ' : '';
+  if (secret) prefix = '⚠ acesso a segredos (.env, variáveis de container) — ';
+  const decision = await ctx.confirm(`${prefix}Permitir ${tool.name} ${describeInput(input, 200)}?`, danger ? undefined : scope.label).catch(() => 'no' as const);
   if (decision === 'always' && !danger) ctx.allowed.add(scope.key);
-  return decision === 'no'
-    ? `The user denied this ${tool.name} call. Do not retry the same call; choose another approach or explain what you need.`
-    : null;
+  if (decision !== 'no') return null;
+  if (secret) return 'Secrets (.env contents, container environment) are off limits. Do not try another way to read them; if a step needs them, say so in your final answer and continue without it.';
+  return `The user denied this ${tool.name} call. Do not retry the same call; choose another approach or explain what you need.`;
 }
 
 const str = (i: Input, k: string): string => i[k] as string;

@@ -165,3 +165,30 @@ test('concurrent index updates share one build (background warm-up + first searc
   assert.equal((await first).files, 1);
   assert.notEqual(index.update(signal), first);
 });
+
+test('secrets: reading .env or container env always asks, even in auto mode and for read-only tools', async () => {
+  const c = { ...ctx(['no', 'no', 'no', 'no']), mode: 'auto' as const };
+  const read = allTools.find((t) => t.name === 'read_file')!;
+  assert.match((await permit(bash, { command: "grep -c '^DATABASE_URL=' api/.env" }, c))!, /off limits/);
+  assert.match((await permit(bash, { command: "docker inspect udp-postgres --format '{{range .Config.Env}}{{println .}}{{end}}'" }, c))!, /off limits/);
+  assert.match((await permit(bash, { command: 'set -a; . api/.env; npm test' }, c))!, /off limits/);
+  assert.match((await permit(read, { path: 'api/.env' }, c))!, /off limits/);
+  assert.match(c.asked[0]!, /segredos/);
+  for (const command of ['cat api/.env.example', 'test -f api/.env && echo sim', 'ls api/.env', 'node -e "console.log(process.env.HOME)"']) {
+    assert.equal(await permit(bash, { command }, c), null, command);
+  }
+  assert.equal(await permit(read, { path: 'src/env.ts' }, c), null);
+  assert.equal(c.asked.length, 4);
+});
+
+test('a confirmation that cannot be answered (no terminal) counts as a denial', async () => {
+  const c = { ...ctx([]), mode: 'auto' as const, confirm: async () => { throw new Error('readline was closed'); } };
+  assert.match((await permit(bash, { command: 'git push --force' }, c))!, /denied/);
+});
+
+test('scope check ignores test files', async () => {
+  const { scopeReport } = await import('../src/scope.js');
+  const task = 'Texto próprio para o alerta quando a viagem termina sem desembarque';
+  assert.equal(scopeReport(task, ['api/src/x.service.ts', 'tests/api/school/x.spec.ts']), null);
+  assert.equal(scopeReport(task, ['src/a.ts', 'src/__tests__/a.test.ts']), null);
+});

@@ -33,7 +33,7 @@ Work in a loop of Think → Act → Observe until the task is truly done:
 - Explore until you can act, not until you know everything. For a change, a handful of targeted searches and reads is usually enough. Read each file once (use offset/limit for big files) and re-read only after it changes; keep what you learned in your notes and plan.
 - Copy existing patterns only inside the layers the request touches. Do not make "consistency" or "just-in-case" changes in other layers (backend, permissions, database, config) — when you think such follow-up work would be useful, list it as suggestions at the end of your final answer instead of doing it.
 - Once you know where the change goes and which existing pattern to copy, start editing. Why: long exploration fills your context and makes later steps less reliable.
-- Stop as soon as the request is done and verified. Extra improvements, refactors and tests nobody asked for are out of scope.
+- Stop as soon as the request is done and verified. Extra improvements, refactors and tests nobody asked for are out of scope, unless the project instructions require tests for every change.
 
 # Guardrails
 - Stay inside the workspace and inside the scope of the task. No unrequested refactors or features.
@@ -129,12 +129,16 @@ function gitInfo(root: string): string {
   }
 }
 
-export function systemPrompt(role: Role, root: string, lang: string, interactive = false, skills: Skill[] = []): string {
-  const docs = ['TRACKAI.md', 'AGENTS.md', 'CLAUDE.md', '.claude/CLAUDE.md']
+export function projectDocs(root: string): string {
+  return ['TRACKAI.md', 'AGENTS.md', 'CLAUDE.md', '.claude/CLAUDE.md']
     .map((name) => ({ name, content: readIfExists(path.join(root, name)) }))
     .filter((d) => d.content)
     .map((d) => `<file name="${d.name}">\n${d.content}\n</file>`)
     .join('\n');
+}
+
+export function systemPrompt(role: Role, root: string, lang: string, interactive = false, skills: Skill[] = []): string {
+  const docs = projectDocs(root);
   const memory = readMemories(root)
     .filter((m) => m.kind === 'fact')
     .slice(-60)

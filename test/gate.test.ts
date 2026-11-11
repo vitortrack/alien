@@ -85,3 +85,11 @@ test('digest: the reference documents are summarized for the request, inline and
   assert.match(j.prompts[0]!, /crop to the card size/);
   assert.deepEqual(j.tools[0], []);
 });
+
+test('gate: the project instructions go into the prompt so rules like "every change has tests" become checks', async () => {
+  const root = repo();
+  fs.writeFileSync(path.join(root, 'CLAUDE.md'), 'Toda alteração entrega testes de todos os cenários.');
+  const j = judge({ slices: [{ title: 'all', spec: '', files: [], criteria: [] }] });
+  await gateFor(root, 'make a.txt say new', j);
+  assert.match(j.prompts[0]!, /<project_instructions>[\s\S]*testes de todos os cenários/);
+});

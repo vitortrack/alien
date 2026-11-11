@@ -28,7 +28,10 @@ export function areaOf(file: string): string {
   return parts.length > 1 ? parts[0]! : '.';
 }
 
-export function scopeReport(task: string, files: string[]): string | null {
+const TEST_FILE = /(^|\/)(tests?|__tests__|specs?)\/|\.(spec|test)\.[cm]?[jt]sx?$/;
+
+export function scopeReport(task: string, changed: string[]): string | null {
+  const files = changed.filter((f) => !TEST_FILE.test(f));
   if (!files.length) return null;
   const byArea = new Map<string, string[]>();
   for (const f of files) byArea.set(areaOf(f), [...(byArea.get(areaOf(f)) ?? []), f]);
