@@ -154,8 +154,8 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
     <p>Pergunte sobre o código ou peça uma alteração. Ele investiga, altera, verifica e passa por um revisor independente.</p>
     <p class="hint">Enter envia · Shift+Enter quebra linha · referências <code>arquivo:linha</code> abrem no editor</p>
   </div>
+  <div id="working" hidden></div>
 </main>
-<div id="working" hidden></div>
 <form id="composer">
   <textarea id="input" rows="3" placeholder="Pergunte ou peça uma tarefa…"></textarea>
   <div class="actions">

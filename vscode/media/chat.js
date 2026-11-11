@@ -125,11 +125,17 @@
     if (stick) messages.scrollTop = messages.scrollHeight;
   }
 
+  const append = (el) => messages.insertBefore(el, working);
+  const clearMessages = () => {
+    for (const el of [...messages.children]) if (el !== working) el.remove();
+  };
+
   function add(className, html, parent = messages) {
     const el = document.createElement('div');
     el.className = className;
     el.innerHTML = html;
-    parent.appendChild(el);
+    if (parent === messages) append(el);
+    else parent.appendChild(el);
     scroll();
     return el;
   }
@@ -165,7 +171,7 @@
     if (work) return work;
     const el = document.createElement('div');
     el.className = 'timeline';
-    messages.appendChild(el);
+    append(el);
     working.innerHTML = `${ALIEN}<span class="verb"></span><span class="meta"></span>`;
     working.hidden = false;
     work = {
@@ -399,7 +405,7 @@
         break;
       case 'restored':
         messages.querySelector('.welcome')?.remove();
-        messages.innerHTML = '';
+        clearMessages();
         for (const turn of m.turns) {
           add('msg user', esc(turn.task).replace(/\n/g, '<br>'));
           add('msg assistant', markdown(turn.answer));
@@ -409,7 +415,7 @@
         break;
       case 'cleared':
         finishWork('stopped');
-        messages.innerHTML = '';
+        clearMessages();
         renderPlan([]);
         add('notice info', 'Nova conversa.');
         break;
