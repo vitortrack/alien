@@ -243,7 +243,6 @@
     w.think.typer.close();
     const secs = Math.max(1, Math.round((Date.now() - w.think.started) / 1000));
     w.think.label.textContent = `Pensou por ${secs}s`;
-    w.think.preview.textContent = '';
     w.think.el.classList.remove('live');
     w.think.el.open = false;
     w.think = null;
@@ -272,8 +271,6 @@
     else if (state !== 'done') add('item notice warn', `Interrompido após ${seconds(w)}s`, w.el);
   }
 
-  const THINK_PREVIEW = 160;
-
   function thinkingDelta(delta) {
     const w = startWork();
     if (w.text) {
@@ -283,15 +280,12 @@
     if (!w.think) {
       const el = document.createElement('details');
       el.className = 'item thinking live';
-      el.open = false;
-      el.innerHTML = '<summary><span class="label">Pensando…</span><span class="count"></span><span class="preview"></span></summary><div class="think-body"></div>';
+      el.open = true;
+      el.innerHTML = '<summary><span class="label">Pensando…</span><span class="count"></span></summary><div class="think-body"></div>';
       w.el.appendChild(el);
-      w.think = { el, label: el.querySelector('.label'), count: el.querySelector('.count'), preview: el.querySelector('.preview'), tail: '', chars: 0, started: Date.now(), typer: typer(el.querySelector('.think-body'), markdown) };
+      w.think = { el, label: el.querySelector('.label'), count: el.querySelector('.count'), chars: 0, started: Date.now(), typer: typer(el.querySelector('.think-body'), markdown) };
     }
     w.think.chars += delta.length;
-    w.think.tail = (w.think.tail + delta).slice(-THINK_PREVIEW * 2);
-    const line = w.think.tail.replace(/\s+/g, ' ').trim();
-    w.think.preview.textContent = line.length > THINK_PREVIEW ? `…${line.slice(-THINK_PREVIEW)}` : line;
     w.think.count.textContent = ` · ${compact(Math.ceil(w.think.chars / 4))} tokens`;
     w.think.typer.feed(delta);
   }

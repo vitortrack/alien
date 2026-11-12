@@ -9,7 +9,6 @@ type OllamaMessage = {
   tool_calls?: OllamaToolCall[];
   tool_name?: string;
   images?: string[];
-  thinking?: string;
 };
 
 type OllamaChunk = {
@@ -46,54 +45,6 @@ function shrinkArgs(call: OllamaToolCall): OllamaToolCall {
   if (typeof args === 'string') return call;
   const short = Object.fromEntries(Object.entries(args).map(([k, v]) => [k, typeof v === 'string' && v.length > ARG_OVER ? `${v.slice(0, 300)}… [${v.length - 300} characters elided]` : v]));
   return { function: { ...call.function, arguments: short } };
-}
-
-const THINK_TAGS = ['think', 'thinking', 'reasoning', 'thought', 'mm:think'];
-
-export class ThinkSplitter {
-  private buffer = '';
-  private close: string | null = null;
-  private state: 'start' | 'think' | 'text' = 'start';
-
-  push(delta: string): { text: string; thinking: string } {
-    if (this.state === 'text') return { text: delta, thinking: '' };
-    this.buffer += delta;
-    if (this.state === 'start') {
-      const lead = this.buffer.trimStart().toLowerCase();
-      const tag = THINK_TAGS.find((t) => lead.startsWith(`<${t}>`));
-      if (!tag) {
-        if (THINK_TAGS.some((t) => `<${t}>`.startsWith(lead))) return { text: '', thinking: '' };
-        this.state = 'text';
-        return this.drain('text');
-      }
-      this.state = 'think';
-      this.close = `</${tag}>`;
-      this.buffer = this.buffer.trimStart().slice(tag.length + 2);
-    }
-    const end = this.buffer.toLowerCase().indexOf(this.close!);
-    if (end >= 0) {
-      const thinking = this.buffer.slice(0, end);
-      const text = this.buffer.slice(end + this.close!.length).trimStart();
-      this.buffer = '';
-      this.state = 'text';
-      return { text, thinking };
-    }
-    const safe = this.buffer.length - this.close!.length;
-    if (safe <= 0) return { text: '', thinking: '' };
-    const thinking = this.buffer.slice(0, safe);
-    this.buffer = this.buffer.slice(safe);
-    return { text: '', thinking };
-  }
-
-  flush(): { text: string; thinking: string } {
-    return this.drain(this.state === 'think' ? 'thinking' : 'text');
-  }
-
-  private drain(kind: 'text' | 'thinking'): { text: string; thinking: string } {
-    const out = this.buffer;
-    this.buffer = '';
-    return kind === 'text' ? { text: out, thinking: '' } : { text: '', thinking: out };
-  }
 }
 
 export function parseInlineToolCalls(text: string, toolNames: Set<string>): OllamaToolCall[] {
@@ -171,37 +122,27 @@ export class OllamaProvider implements Provider {
     );
 
     let text = '';
-    let thinking = '';
-    const splitter = new ThinkSplitter();
-    const emit = (part: { text: string; thinking: string }) => {
-      if (part.thinking) {
-        thinking += part.thinking;
-        req.onThinking(part.thinking);
-      }
-      if (part.text) {
-        text += part.text;
-        req.onText(part.text);
-      }
-    };
     let toolCalls: OllamaToolCall[] = [];
     let usage: Usage = { input: 0, output: 0 };
     let doneReason = '';
     for await (const chunk of this.chunks(res)) {
       if (chunk.error) throw new Error(`Ollama: ${chunk.error}`);
       const m = chunk.message;
-      if (m?.thinking) emit({ text: '', thinking: m.thinking });
-      if (m?.content) emit(splitter.push(m.content));
+      if (m?.thinking) req.onThinking(m.thinking);
+      if (m?.content) {
+        text += m.content;
+        req.onText(m.content);
+      }
       if (m?.tool_calls?.length) toolCalls = toolCalls.concat(m.tool_calls);
       if (chunk.done) {
         usage = { input: chunk.prompt_eval_count ?? 0, output: chunk.eval_count ?? 0 };
         doneReason = chunk.done_reason ?? '';
       }
     }
-    emit(splitter.flush());
     this.lastPromptTokens = usage.input;
 
     if (!toolCalls.length) toolCalls = parseInlineToolCalls(text, new Set(req.tools.map((t) => t.name)));
-    this.history.push({ role: 'assistant', content: text, ...(thinking ? { thinking } : {}), ...(toolCalls.length ? { tool_calls: toolCalls } : {}) });
+    this.history.push({ role: 'assistant', content: text, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) });
 
     const calls: ToolCall[] = toolCalls.map((c) => ({
       id: randomUUID(),
@@ -220,7 +161,7 @@ export class OllamaProvider implements Provider {
     this.history.forEach((m, i) => m.role === 'tool' && m.content.length > DEDUP_OVER && newest.set(m.content, i));
     return this.history.map((m, i) => {
       if (m.role === 'tool' && (newest.get(m.content) ?? i) !== i) return { ...m, content: '[identical to a later output of this tool; see the latest copy]' };
-      if (shrink.has(i)) return { ...m, tool_calls: m.tool_calls!.map(shrinkArgs), thinking: undefined };
+      if (shrink.has(i)) return { ...m, tool_calls: m.tool_calls!.map(shrinkArgs) };
       if (!elide.has(i) || m.content.length <= ELIDE_OVER) return m;
       return { ...m, content: `${m.content.slice(0, 600)}\n… [older tool output elided to save context; run the tool again if you need it]` };
     });
