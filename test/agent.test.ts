@@ -852,3 +852,16 @@ test('skill review: after a long task a separate call saves a class-level skill 
     ui.close();
   }
 });
+
+test('an empty or reasoning-only reply gets up to two reminders to answer, then the loop ends', async () => {
+  const ui = UI.create();
+  try {
+    const recovers = new ScriptedProvider([() => answer(''), ({ user }) => (assert.match(user.at(-1)!, /^\[System: Your previous response contained no visible answer or tool call/), answer('resposta'))]);
+    assert.equal(await new Session(config(workspace()), ui, () => recovers).run('x'), 'resposta');
+    const silent = new ScriptedProvider([() => answer(''), () => answer('  '), () => answer('')]);
+    assert.equal(await new Session(config(workspace()), ui, () => silent).run('x'), '');
+    assert.equal(silent.user.filter((u) => u.startsWith('[System:')).length, 2);
+  } finally {
+    ui.close();
+  }
+});

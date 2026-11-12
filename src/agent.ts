@@ -55,6 +55,9 @@ const readIfExists = (file: string): string | null => {
 const isDocFile = (f: string): boolean => /\.(md|mdx|txt|rst)$/i.test(f);
 
 const MAX_JUDGE_REJECTIONS = 2;
+const MAX_EMPTY_NUDGES = 2;
+const EMPTY_NUDGE =
+  '[System: Your previous response contained no visible answer or tool call. Do not keep thinking. Process the tool results above and produce your final answer as plain text now (or make the tool call you were planning).]';
 
 export class Agent {
   private readonly provider: Provider;
@@ -158,6 +161,7 @@ export class Agent {
     let reviews = 0;
     let scopeChecks = 0;
     let verifyNudges = 0;
+    let emptyNudges = 0;
     let requirementsChecked = this.role !== 'main';
     let approvedDiff: string | null = null;
     let lastScopeReport: string | null = null;
@@ -189,6 +193,12 @@ export class Agent {
         if (r.toolCalls.length === 0) {
           if (r.stop === 'max_tokens') {
             this.provider.addUser('Your reply was cut off by the output limit. Continue exactly where you stopped.');
+            continue;
+          }
+          if (!r.text.trim() && emptyNudges < MAX_EMPTY_NUDGES) {
+            emptyNudges++;
+            this.session.log({ agent: this.role, event: 'empty-nudge', attempt: emptyNudges });
+            this.provider.addUser(EMPTY_NUDGE);
             continue;
           }
           if (gated) {
