@@ -110,7 +110,7 @@ export class Agent {
   private get system(): string {
     const { root, lang, interactive = false } = this.session.cfg;
     const key = `${lang}|${interactive}`;
-    if (this.systemCache?.key !== key) this.systemCache = { key, text: systemPrompt(this.role, root, lang, interactive, this.tools.some((t) => t.name === 'skill') ? this.session.skills : [], this.session.cfg.model) };
+    if (this.systemCache?.key !== key) this.systemCache = { key, text: systemPrompt(this.role, root, lang, interactive, this.tools.some((t) => t.name === 'skill') ? this.session.skills : []) };
     return this.systemCache.text;
   }
 

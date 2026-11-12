@@ -45,11 +45,6 @@ Work in a loop of Think → Act → Observe until the task is truly done:
 
 # Talking while you work
 Between tool calls, write at most one short sentence saying what you will check next and why. No filler, no repeated summaries.
-Match the length of your reply to the weight of the ask: a one-line question gets a one-line answer. Agree because it is right, not because the user said it.
-
-# Finishing the job
-When the user asks you to build, run, or verify something, the deliverable is a working artifact backed by real tool output, not a description of one. Do not stop after writing a stub, a plan, or a single command.
-If a tool, install, or network call fails and blocks the real path, say so directly and try an alternative. NEVER substitute plausible-looking fabricated output (made-up data, invented file contents, synthesised responses) for results you could not actually produce. Reporting a blocker honestly is always better than inventing a result.
 
 # Investigating and answering questions
 When the user asks a question instead of requesting a change:
@@ -65,47 +60,6 @@ Use Markdown: short headings only when the answer has several parts, bullet list
 
 # Final answer after changes
 When you changed files, finish WITHOUT tool calls with a short report: what changed (files), how it was verified, assumptions, and anything left open.`;
-
-const TOOL_USE_ENFORCEMENT = `# Tool-use enforcement
-You MUST use your tools to take action — do not describe what you would do or plan to do without actually doing it. When you say you will perform an action (e.g. 'I will run the tests', 'Let me check the file'), you MUST make the corresponding tool call in the same response. Never end your turn with a promise of future action — execute it now.
-Every response should either (a) contain tool calls that make progress, or (b) deliver a final result to the user. Responses that only describe intentions without acting are not acceptable.`;
-
-const EXECUTION_DISCIPLINE = `# Execution discipline
-<tool_persistence>
-- If a tool returns empty, partial, or suspiciously narrow results, retry with a broader or different query or strategy before concluding.
-- Keep calling tools until the task is complete AND you have verified the result.
-</tool_persistence>
-
-<mandatory_tool_use>
-NEVER answer these from memory or mental computation — ALWAYS use a tool:
-- Arithmetic, math, calculations → bash or run_code
-- Hashes, encodings, checksums → bash (e.g. sha256sum, base64)
-- Current time, date, timezone → bash (date)
-- System state: OS, CPU, memory, disk, ports, processes → bash
-- File contents, sizes, line counts → read_file, grep or bash
-- Git history, branches, diffs → bash
-</mandatory_tool_use>
-
-<prerequisite_checks>
-- Before taking an action, check whether prerequisite discovery or lookup steps are needed; do not skip them just because the final action seems obvious.
-- If a task depends on output from a prior step, resolve that dependency first.
-</prerequisite_checks>
-
-<literal_preservation>
-- Preserve identifiers, commands, and values exactly as given — never 'repair' or normalize a token that fails a stated format.
-</literal_preservation>
-
-<missing_context>
-- If required context is missing, do NOT guess. Look it up with read_file, grep or semantic_search when it is retrievable; if you must proceed without it, label the assumption explicitly.
-</missing_context>
-
-<verification>
-- Completion: 'done' means every named acceptance criterion is verified — never a plausible subset. Completing your plan is not itself the answer; the requested output must appear in your response.
-</verification>`;
-
-const TOOL_USE_ENFORCEMENT_MODELS = ['gpt', 'codex', 'gemini', 'gemma', 'grok', 'glm', 'qwen', 'deepseek', 'muse'];
-const EXECUTION_DISCIPLINE_MODELS = ['gpt', 'codex', 'grok', 'deepseek', 'kimi', 'qwen', 'glm', 'minimax', 'mimo', 'mistral', 'muse'];
-const forModel = (model: string, families: string[]): boolean => families.some((f) => model.toLowerCase().includes(f));
 
 const ASK_RULE =
   '- If the request leaves open a decision that would change the size of the work a lot (reuse an existing page or build a new one, persist data or keep it in memory), ask the user one short question and stop; the user will answer in the chat.';
@@ -183,7 +137,7 @@ export function projectDocs(root: string): string {
     .join('\n');
 }
 
-export function systemPrompt(role: Role, root: string, lang: string, interactive = false, skills: Skill[] = [], model = ''): string {
+export function systemPrompt(role: Role, root: string, lang: string, interactive = false, skills: Skill[] = []): string {
   const docs = projectDocs(root);
   const memory = readMemories(root)
     .filter((m) => m.kind === 'fact')
@@ -198,8 +152,6 @@ export function systemPrompt(role: Role, root: string, lang: string, interactive
   ].join('\n');
   return [
     CORE.replace('${INTERACTIVE_RULE}', interactive && role === 'main' ? ASK_RULE : DECIDE_RULE),
-    forModel(model, TOOL_USE_ENFORCEMENT_MODELS) && TOOL_USE_ENFORCEMENT,
-    forModel(model, EXECUTION_DISCIPLINE_MODELS) && EXECUTION_DISCIPLINE,
     ROLE[role],
     languageRule(lang),
     `<environment>\n${env}\n</environment>`,

@@ -405,16 +405,6 @@ test('ambiguity rule: ask in interactive chat, decide alone otherwise', () => {
   assert.match(systemPrompt('main', root, 'pt-BR', false), /nobody is available to answer: choose the smaller option/);
   assert.match(systemPrompt('worker', root, 'pt-BR', true), /nobody is available to answer/);
   assert.doesNotMatch(systemPrompt('main', root, 'pt-BR', true), /INTERACTIVE_RULE/);
-  for (const model of ['glm-5.3-flash:cloud', 'qwen3-coder:30b', 'gpt-oss:120b-cloud']) {
-    assert.match(systemPrompt('main', root, 'pt-BR', false, [], model), /# Tool-use enforcement[\s\S]*# Execution discipline/, model);
-  }
-  const minimax = systemPrompt('main', root, 'pt-BR', false, [], 'minimax-m3.1-flash:cloud');
-  assert.match(minimax, /# Execution discipline/);
-  assert.doesNotMatch(minimax, /# Tool-use enforcement/);
-  const claude = systemPrompt('main', root, 'pt-BR', false, [], 'claude-opus-5-5');
-  assert.doesNotMatch(claude, /# Tool-use enforcement|# Execution discipline/);
-  assert.match(claude, /# Finishing the job[\s\S]*NEVER substitute plausible-looking fabricated output/);
-  assert.match(claude, /Agree because it is right, not because the user said it\./);
 });
 
 test('sessions are saved after each task, resumed with their history and forked under a new id', async () => {
