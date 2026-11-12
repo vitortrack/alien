@@ -1,4 +1,4 @@
-# TrackAI
+# Alien
 
 Agente de código autônomo para o terminal. Lê, entende, altera e verifica código no seu projeto, com raciocínio ReAct (pensar → agir → observar), planejamento, autocorreção, portões determinísticos de verificação e de escopo, orquestração multiagente, RAG sobre o código e memória vetorial de longo prazo.
 
@@ -17,16 +17,16 @@ Causa raiz: o laço começa em i = 1 e pula o primeiro item…
 
 ## Requisitos
 
-O mesmo núcleo roda no CLI e na extensão do VS Code, então os requisitos são os mesmos, com duas diferenças: o CLI precisa de **Node.js 22+**, e a extensão precisa de **VS Code 1.90+** (ela já leva o Node do próprio VS Code e o código do TrackAI dentro do `.vsix`, sem precisar de Node nem npm na máquina).
+O mesmo núcleo roda no CLI e na extensão do VS Code, então os requisitos são os mesmos, com duas diferenças: o CLI precisa de **Node.js 22+**, e a extensão precisa de **VS Code 1.90+** (ela já leva o Node do próprio VS Code e o código do Alien dentro do `.vsix`, sem precisar de Node nem npm na máquina).
 
 **Obrigatório**
 
 - **Um modelo**, de uma destas formas:
-  - **Ollama** instalado e rodando em `http://localhost:11434`. Para outro endereço, use `OLLAMA_HOST` no CLI ou *Settings → TrackAI → Ollama Host* na extensão. O modelo padrão, `glm-5.3-flash:cloud`, roda na nuvem do Ollama: é preciso entrar na conta com `ollama signin`. Modelos locais (`-m qwen3:8b`, por exemplo) não precisam de conta, só de `ollama pull`.
+  - **Ollama** instalado e rodando em `http://localhost:11434`. Para outro endereço, use `OLLAMA_HOST` no CLI ou *Settings → Alien → Ollama Host* na extensão. O modelo padrão, `glm-5.3-flash:cloud`, roda na nuvem do Ollama: é preciso entrar na conta com `ollama signin`. Modelos locais (`-m qwen3:8b`, por exemplo) não precisam de conta, só de `ollama pull`.
   - **Ou Claude**, com `ANTHROPIC_API_KEY` no ambiente. Na extensão, a variável precisa existir no ambiente em que o VS Code foi aberto.
 - **`bash`, `git`, `grep` e `find` no PATH.** Linux e macOS já trazem. No Windows, use WSL ou Git Bash: a ferramenta de terminal do agente chama `bash` diretamente.
 
-O TrackAI não depende do Claude Code: o modo multiagente (`--orchestrate`), as checagens de pronto (`--gate`) e a reescrita de harness (`src/rhi.ts`) usam o mesmo modelo configurado para o agente, por meio de um agente do próprio TrackAI só de leitura, que devolve as decisões em JSON validado.
+O Alien não depende do Claude Code: o modo multiagente (`--orchestrate`), as checagens de pronto (`--gate`) e a reescrita de harness (`src/rhi.ts`) usam o mesmo modelo configurado para o agente, por meio de um agente do próprio Alien só de leitura, que devolve as decisões em JSON validado.
 
 **Opcional, por recurso**
 
@@ -41,7 +41,7 @@ O TrackAI não depende do Claude Code: o modo multiagente (`--orchestrate`), as 
 ```bash
 npm install
 npm run build
-npm link            # deixa o comando `trackai` disponível no sistema
+npm link            # deixa o comando `alien` disponível no sistema
 ```
 
 Provedor local (padrão quando não há chave da Anthropic):
@@ -51,29 +51,29 @@ ollama pull qwen3-embedding:0.6b  # embeddings para RAG e memória vetorial (mel
 # modelo de chat padrão: glm-5.3-flash:cloud (troque com -m, ex.: -m qwen3:8b)
 ```
 
-Claude: exporte `ANTHROPIC_API_KEY` e o TrackAI passa a usar `claude-opus-5-5` (ou force com `-p anthropic`).
+Claude: exporte `ANTHROPIC_API_KEY` e o Alien passa a usar `claude-opus-5-5` (ou force com `-p anthropic`).
 
 ## Extensão do VS Code
 
-Chat do TrackAI na barra lateral (ícone do alienígena), com o mesmo núcleo do CLI.
+Chat do Alien na barra lateral (ícone do alienígena), com o mesmo núcleo do CLI.
 
 ```bash
 cd vscode
 npm install
-npm run package                                   # gera trackai-0.1.0.vsix
-code --install-extension trackai-0.1.0.vsix --force
+npm run package                                   # gera alien-0.1.0.vsix
+code --install-extension alien-0.1.0.vsix --force
 ```
 
-Configurações em *Settings → TrackAI*. Referências `arquivo:linha` abrem no editor; permissões aparecem como botões Permitir/Negar; a opção **multiagente** usa o pipeline planner → workers → revisor.
+Configurações em *Settings → Alien*. Referências `arquivo:linha` abrem no editor; permissões aparecem como botões Permitir/Negar; a opção **multiagente** usa o pipeline planner → workers → revisor.
 
 ## Uso
 
 ```bash
-trackai                                   # modo interativo na pasta atual
-trackai "adicione paginação na listagem"  # executa e sai
-trackai -C ../meu-projeto --mode auto "corrija o build"
-trackai --orchestrate "crie o módulo de cupons com testes"
-trackai -p anthropic --effort xhigh "investigue o vazamento de memória"
+alien                                   # modo interativo na pasta atual
+alien "adicione paginação na listagem"  # executa e sai
+alien -C ../meu-projeto --mode auto "corrija o build"
+alien --orchestrate "crie o módulo de cupons com testes"
+alien -p anthropic --effort xhigh "investigue o vazamento de memória"
 ```
 
 | Opção | Descrição |
@@ -98,12 +98,12 @@ trackai -p anthropic --effort xhigh "investigue o vazamento de memória"
 
 Comandos no modo interativo: `/plan`, `/mode`, `/review on|off`, `/lang <idioma>`, `/traduzir [idioma]`, `/thinking on|off`, `/orchestrate <tarefa>`, `/index`, `/memory`, `/usage`, `/sessions`, `/resume <id>`, `/fork`, `/clear`, `/exit`. **Ctrl+C** interrompe a tarefa em andamento sem sair.
 
-Cada conversa é salva ao fim de cada tarefa em `~/.trackai/projects/<projeto>/sessions/<id>.json` (histórico do agente, pedidos e respostas, plano e uso). A extensão do VS Code restaura a conversa aberta quando a janela recarrega; **Nova conversa** começa outra.
+Cada conversa é salva ao fim de cada tarefa em `~/.alien/projects/<projeto>/sessions/<id>.json` (histórico do agente, pedidos e respostas, plano e uso). A extensão do VS Code restaura a conversa aberta quando a janela recarrega; **Nova conversa** começa outra.
 
 ### Fazendo perguntas
 
 ```bash
-trackai -C ../meu-projeto --mode read-only
+alien -C ../meu-projeto --mode read-only
 › Como funciona a consulta pública de protocolo? O que reutilizar para criar outra?
 › /traduzir en          # a última resposta, em inglês
 › /lang es              # daqui em diante, tudo em espanhol
@@ -138,21 +138,21 @@ A saída é Markdown renderizado no terminal (títulos, listas, negrito, blocos 
 
 | Componente | Como está implementado | Onde |
 |---|---|---|
-| **1. Núcleo cognitivo** | Persona de engenheiro sênior, método de resolução (evidência → causa raiz → decisão → verificação → reflexão → aprendizado), guardrails (escopo, segredos, ações destrutivas) e um prompt por papel (main, worker, explorer, planner, critic). Instruções do projeto em `TRACKAI.md`, `AGENTS.md` ou `CLAUDE.md` são carregadas automaticamente. | `src/prompts.ts` |
-| **2. Memória** | **Curto prazo:** histórico da sessão, com compactação automática (resumo) quando a janela do modelo enche. **Longo prazo:** banco vetorial em `.trackai/memory.jsonl` com *fatos*, *lições* e *episódios*; as lembranças relevantes são recuperadas no início de cada tarefa, os episódios são gravados automaticamente ao concluir e o agente consulta a memória com `recall`. | `src/memory.ts`, `src/providers/ollama.ts` |
+| **1. Núcleo cognitivo** | Persona de engenheiro sênior, método de resolução (evidência → causa raiz → decisão → verificação → reflexão → aprendizado), guardrails (escopo, segredos, ações destrutivas) e um prompt por papel (main, worker, explorer, planner, critic). Instruções do projeto em `ALIEN.md`, `AGENTS.md` ou `CLAUDE.md` são carregadas automaticamente. | `src/prompts.ts` |
+| **2. Memória** | **Curto prazo:** histórico da sessão, com compactação automática (resumo) quando a janela do modelo enche. **Longo prazo:** banco vetorial em `.alien/memory.jsonl` com *fatos*, *lições* e *episódios*; as lembranças relevantes são recuperadas no início de cada tarefa, os episódios são gravados automaticamente ao concluir e o agente consulta a memória com `recall`. | `src/memory.ts`, `src/providers/ollama.ts` |
 | **3. Planejamento** | Laço ReAct; planner dedicado no modo `--orchestrate`; autocorreção (o erro volta como observação estruturada, e após 3 falhas seguidas o agente é instruído a mudar de estratégia); antes de concluir, **portão de verificação** (se mexeu em código e não rodou nada depois da última edição, pede uma vez para rodar testes/build) e **checagem de escopo** (áreas do diff que o pedido não menciona); revisor independente opcional (`--review`). | `src/agent.ts`, `src/orchestrator.ts` |
 | **4. Ferramentas** | Agente principal: `bash`, `read_file`, `write_file`, `edit_file`, `semantic_search` (RAG), `web_fetch`, `delegate`, `recall`, `skill` (só quando há skills), `report_conflict` (encerra a tarefa relatando que um teste ou o código contradiz o pedido, em vez de contornar; só aceito depois de editar e rodar algo). Entradas validadas contra o schema; caminhos presos ao workspace (inclusive via symlink); permissões por modo; detecção de comandos destrutivos. Listar, buscar e rodar código ficam com o `bash`: na avaliação, as ferramentas dedicadas (`list_dir`, `glob`, `grep`, `run_code`, `update_plan`, `remember`) custavam ~40% mais passos e tokens sem ganho de acerto; os subagentes de pesquisa, que não têm `bash`, continuam com `list_dir`, `glob` e `grep`. | `src/tools.ts`, `src/validate.ts` |
-| **5. Observabilidade** | Trace de cada passo (texto do modelo, chamadas, resultados, tokens e custo) em `~/.trackai/sessions/*.jsonl`; contagem de tokens e custo estimado ao fim de cada tarefa; travas contra loop (limite de passos, chamada idêntica repetida, orçamento de tokens) e Ctrl+C para interromper. | `src/session.ts`, `src/agent.ts` |
+| **5. Observabilidade** | Trace de cada passo (texto do modelo, chamadas, resultados, tokens e custo) em `~/.alien/sessions/*.jsonl`; contagem de tokens e custo estimado ao fim de cada tarefa; travas contra loop (limite de passos, chamada idêntica repetida, orçamento de tokens) e Ctrl+C para interromper. | `src/session.ts`, `src/agent.ts` |
 
 **Multiagente.** O agente principal age como gerente: delega pesquisa ampla a *explorers* (somente leitura, rodam em paralelo) e subtarefas independentes a *workers*, e cada sub-agente começa com contexto limpo. No `--orchestrate`, o pipeline é fixo: planner → um worker por passo → revisor → correções.
 
-**RAG.** `semantic_search` indexa o código em trechos de 60 linhas (com sobreposição) e ranqueia combinando similaridade de embeddings (peso 0,8) e BM25 (0,2). O agente escreve a busca como pergunta + identificadores prováveis em inglês, o que funciona como expansão de query. O índice é incremental e fica em `~/.trackai/projects/`, fora do repositório. Sem modelo de embedding, cai para BM25 puro.
+**RAG.** `semantic_search` indexa o código em trechos de 60 linhas (com sobreposição) e ranqueia combinando similaridade de embeddings (peso 0,8) e BM25 (0,2). O agente escreve a busca como pergunta + identificadores prováveis em inglês, o que funciona como expansão de query. O índice é incremental e fica em `~/.alien/projects/`, fora do repositório. Sem modelo de embedding, cai para BM25 puro.
 
 **Robustez com modelos locais.** Modelos menores às vezes escrevem a chamada de ferramenta como texto (`<tool_call>…`, bloco JSON). O provedor do Ollama reconhece esses formatos e executa a chamada mesmo assim. Números enviados como string são convertidos automaticamente.
 
 ## Skills
 
-O TrackAI lê skills no formato do Claude Code (`SKILL.md` com `name` e `description` no frontmatter) em `.claude/skills/` e `.agents/skills/` do projeto e em `~/.claude/skills/`; com o mesmo nome, vale a do projeto. O prompt lista só nome e descrição; o agente carrega o texto completo (e os arquivos de apoio da pasta) com a ferramenta `skill` quando a tarefa combina. Sem skills, nada muda no prompt nem nas ferramentas. Na avaliação, com uma regra de projeto que só existe numa skill, o acerto foi de 12/20 para 19/20 e o agente carregou a skill nas 20 execuções.
+O Alien lê skills no formato do Claude Code (`SKILL.md` com `name` e `description` no frontmatter) em `.claude/skills/` e `.agents/skills/` do projeto e em `~/.claude/skills/`; com o mesmo nome, vale a do projeto. O prompt lista só nome e descrição; o agente carrega o texto completo (e os arquivos de apoio da pasta) com a ferramenta `skill` quando a tarefa combina. Sem skills, nada muda no prompt nem nas ferramentas. Na avaliação, com uma regra de projeto que só existe numa skill, o acerto foi de 12/20 para 19/20 e o agente carregou a skill nas 20 execuções.
 
 ## Edição de arquivos
 
@@ -204,4 +204,4 @@ src/
 
 - As ferramentas de arquivo não saem do workspace. O `bash` roda com as permissões do seu usuário: use `--mode ask` (padrão) em projetos importantes e `--mode auto` só onde confia no resultado.
 - Comandos destrutivos (`rm -rf /`, `sudo`, `git push --force`, `git reset --hard`, `curl | sh`, …) sempre pedem confirmação, mesmo em `auto`.
-- `.trackai/` guarda o índice e a memória do projeto. Ela já está no `.gitignore` deste repositório; adicione-a também nos projetos em que usar o agente.
+- `.alien/` guarda o índice e a memória do projeto. Ela já está no `.gitignore` deste repositório; adicione-a também nos projetos em que usar o agente.

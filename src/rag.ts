@@ -8,7 +8,7 @@ const CHUNK_OVERLAP = 12;
 const MAX_FILE_BYTES = 400_000;
 const MAX_FILES = 5_000;
 const EMBED_BATCH = 32;
-const IGNORED = /(^|\/)(node_modules|\.git|dist|build|\.next|coverage|\.trackai|vendor|__pycache__|\.venv|target)(\/|$)/;
+const IGNORED = /(^|\/)(node_modules|\.git|dist|build|\.next|coverage|\.alien|vendor|__pycache__|\.venv|target)(\/|$)/;
 const TEXT_EXT = new Set(
   'ts tsx js jsx mjs cjs py rb go rs java kt kts scala cs php c h cpp hpp swift m sql sh bash zsh md mdx txt json yaml yml toml ini cfg conf xml html css scss less vue svelte graphql proto dockerfile makefile gradle tf lua r dart ex exs erl hs clj'.split(
     ' ',

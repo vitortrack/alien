@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { typeDiagnostics } from '../src/diagnostics.js';
 
 function project(typescript?: string): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-diag-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alien-diag-'));
   fs.mkdirSync(path.join(root, 'src'));
   fs.writeFileSync(path.join(root, 'tsconfig.json'), JSON.stringify({ compilerOptions: { strict: true, noUnusedLocals: true, lib: ['ES2022'] }, include: ['src'] }));
   fs.writeFileSync(path.join(root, 'src/ok.ts'), "import { other } from './other';\nexport const a = other(1);\n");
@@ -24,8 +24,8 @@ test('diagnostics: silent when the project has no TypeScript or the file is not 
   assert.equal(typeDiagnostics(root, 'README.md'), '');
 });
 
-const ts5 = process.env.TRACKAI_TEST_TS5;
-test('diagnostics: undefined names and unused locals are reported, unresolved imports are not', { skip: !ts5 && 'set TRACKAI_TEST_TS5 to a typescript@5 folder' }, () => {
+const ts5 = process.env.ALIEN_TEST_TS5;
+test('diagnostics: undefined names and unused locals are reported, unresolved imports are not', { skip: !ts5 && 'set ALIEN_TEST_TS5 to a typescript@5 folder' }, () => {
   const root = project(ts5);
   assert.equal(typeDiagnostics(root, 'src/ok.ts'), '');
   const out = typeDiagnostics(root, 'src/bad.ts');

@@ -85,7 +85,7 @@ export class UI implements AgentUI {
   };
 
   banner(lines: string[]): void {
-    this.line(paint(['bold', 'cyan'], 'TrackAI') + paint('gray', ' — agente de código autônomo'));
+    this.line(paint(['bold', 'cyan'], 'Alien') + paint('gray', ' — agente de código autônomo'));
     for (const l of lines) this.line(paint('gray', `  ${l}`));
     this.line(paint('gray', '  /help para comandos · Ctrl+C interrompe a tarefa'));
   }

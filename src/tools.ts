@@ -52,12 +52,12 @@ const OFFLOAD_HEAD = 2_400;
 const OFFLOAD_TAIL = 3_600;
 const RPC_TOOLS = ['read_file', 'grep', 'glob', 'list_dir', 'bash'];
 const MAX_RPC_CALLS = 50;
-const SCRATCH_DIR = '.trackai';
+const SCRATCH_DIR = '.alien';
 const OUTLINE_OVER = 300;
 const WINDOW = 100;
 const GREP_SUMMARY_OVER = 30;
 const DECLARATION = /^(export\s+)?(default\s+)?(declare\s+)?(abstract\s+)?(async\s+)?(function\*?|class|interface|type|enum|const|let|def)\s+[\w$]+|^(  |\t)?@(Get|Post|Put|Patch|Delete|Controller|Injectable|Module)\b|^(  |\t)((public|private|protected|static|readonly|async)\s+)*(def\s+)?[\w$]+\s*\([^)]*\)\s*(:\s*[^{=]+)?[{:]\s*$/;
-const IGNORED_DIRS = ['node_modules', '.git', 'dist', 'build', '.next', 'coverage', '.trackai'];
+const IGNORED_DIRS = ['node_modules', '.git', 'dist', 'build', '.next', 'coverage', '.alien'];
 const IGNORED = new RegExp(`(^|/)(${IGNORED_DIRS.map((d) => d.replace('.', '\\.')).join('|')})(/|$)`);
 
 const DANGEROUS: RegExp[] = [
@@ -553,7 +553,7 @@ export const allTools: Tool[] = [
     name: 'bash',
     readOnly: false,
     description:
-      'Run a shell command in the workspace root (non-interactive, no stdin). Use it to build, test, type-check, run git, or inspect the system. Reading with cat, sed, grep or ls does not change any file, so it is not progress on the task: write the change with edit_file or write_file. Long output is saved to a file under .trackai/ and you get its head, tail and path: grep or page that file instead of running the command again.',
+      'Run a shell command in the workspace root (non-interactive, no stdin). Use it to build, test, type-check, run git, or inspect the system. Reading with cat, sed, grep or ls does not change any file, so it is not progress on the task: write the change with edit_file or write_file. Long output is saved to a file under .alien/ and you get its head, tail and path: grep or page that file instead of running the command again.',
     schema: {
       type: 'object',
       properties: {
@@ -582,7 +582,7 @@ export const allTools: Tool[] = [
       if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Only http and https URLs are allowed.');
       const res = await fetch(url, {
         signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(20_000)]),
-        headers: { 'user-agent': 'TrackAI/0.1 (+coding agent)' },
+        headers: { 'user-agent': 'Alien/0.1 (+coding agent)' },
       });
       const body = await res.text();
       const text = (res.headers.get('content-type') ?? '').includes('html') ? htmlToText(body) : body;

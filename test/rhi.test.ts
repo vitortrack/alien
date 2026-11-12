@@ -10,7 +10,7 @@ import type { Provider, StepRequest, StepResult, ToolResult } from '../src/types
 import { UI } from '../src/ui.js';
 
 process.env.OLLAMA_HOST = 'http://127.0.0.1:9';
-process.env.TRACKAI_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-home-'));
+process.env.ALIEN_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'alien-home-'));
 
 function fakeJudge<T>(reply: T): Judge & { prompts: string[]; tools: string[][] } {
   const judge = {
@@ -70,7 +70,7 @@ class Scripted implements Provider {
 }
 
 test('task harness: the refined harness text opens the task, before the request', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-test-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alien-test-'));
   const cfg: Config = { provider: 'ollama', model: 'mock', mode: 'auto', root, maxSteps: 5, review: false, effort: 'high', numCtx: 8192, embedModel: 'none', tokenBudget: 0, lang: 'pt-BR', logDir: null, harness: 'Steps:\n1. migration first' };
   const provider = new Scripted([
     (user) => {

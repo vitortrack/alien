@@ -49,15 +49,15 @@ const { values } = parseArgs({
 
 const outDir = path.join(path.dirname(new URL(import.meta.url).pathname), 'results', `${new Date().toISOString().replace(/[:.]/g, '-')}-${values.label}`);
 fs.mkdirSync(outDir, { recursive: true });
-process.env.TRACKAI_USER_SKILLS = 'off';
-process.env.TRACKAI_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-eval-home-'));
+process.env.ALIEN_USER_SKILLS = 'off';
+process.env.ALIEN_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'alien-eval-home-'));
 
 function git(dir: string, ...args: string[]): void {
-  execFileSync('git', ['-c', 'user.email=eval@trackai', '-c', 'user.name=eval', ...args], { cwd: dir, stdio: 'ignore' });
+  execFileSync('git', ['-c', 'user.email=eval@alien', '-c', 'user.name=eval', ...args], { cwd: dir, stdio: 'ignore' });
 }
 
 function setup(s: Scenario): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `trackai-eval-${s.id}-`));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `alien-eval-${s.id}-`));
   const write = (files: Record<string, string>) => {
     for (const [file, content] of Object.entries(files)) {
       fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
@@ -104,7 +104,7 @@ async function runOne(s: Scenario, run: number): Promise<RunResult> {
     review: s.kind !== 'question' && values.review === 'on',
     effort: 'high',
     numCtx: 65536,
-    embedModel: process.env.TRACKAI_EMBED_MODEL ?? 'qwen3-embedding:0.6b',
+    embedModel: process.env.ALIEN_EMBED_MODEL ?? 'qwen3-embedding:0.6b',
     tokenBudget: 0,
     lang: 'pt-BR',
     logDir: null,
@@ -169,7 +169,7 @@ async function pool<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>
 const suites: Record<string, Scenario[]> = { base: scenarios, hard: hardScenarios, real: realScenarios, impossible: impossibleScenarios, long: longScenarios, skills: skillScenarios, card: cardScenarios, harness: harnessScenarios, all: [...scenarios, ...hardScenarios, ...realScenarios] };
 const selected = (suites[values.suite!] ?? suites.all!).filter((s) => !values.filter || s.id.includes(values.filter));
 const jobs = selected.flatMap((s) => Array.from({ length: Number(values.runs) }, (_, k) => ({ s, run: k + 1 })));
-console.log(`TrackAI eval · ${values.provider}/${values.model} · ${selected.length} cenários × ${values.runs} = ${jobs.length} execuções → ${outDir}`);
+console.log(`Alien eval · ${values.provider}/${values.model} · ${selected.length} cenários × ${values.runs} = ${jobs.length} execuções → ${outDir}`);
 
 const results = await pool(jobs, Number(values.concurrency), async ({ s, run }) => {
   const r = await runOne(s, run);

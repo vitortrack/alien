@@ -75,7 +75,7 @@ function context(root: string): ToolContext {
 const tool = (name: string) => allTools.find((t) => t.name === name)!;
 
 test('edit_file: exact edits on unread files, fresh read otherwise, syntax gate and snippet', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-edit-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alien-edit-'));
   fs.writeFileSync(path.join(root, 'a.js'), 'export const a = 1;\nexport const b = 2;\n');
   const ctx = context(root);
   await assert.rejects(tool('edit_file').run({ path: 'nope.js', old_string: 'x', new_string: 'y' }, ctx), /does not exist\. Create it with write_file/);
@@ -103,7 +103,7 @@ test('edit_file: exact edits on unread files, fresh read otherwise, syntax gate 
 });
 
 test('read_file pages large files with a header and a continuation hint', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-read-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alien-read-'));
   fs.writeFileSync(path.join(root, 'big.txt'), Array.from({ length: 1000 }, (_, i) => `line ${i + 1}`).join('\n'));
   const out = await tool('read_file').run({ path: 'big.txt', offset: 500, limit: 10 }, context(root));
   assert.match(out, /^\[big\.txt: lines 500-509 of 1000; 499 lines above\]/);
@@ -111,7 +111,7 @@ test('read_file pages large files with a header and a continuation hint', async 
 });
 
 test('bash timeout kills the whole process group, not just the shell', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-bash-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alien-bash-'));
   const marker = path.join(root, 'still-alive');
   const out = await tool('bash').run({ command: `(sleep 2 && touch ${marker}) & sleep 30`, timeout_seconds: 1 }, context(root));
   assert.match(out, /whole process group/);
@@ -120,7 +120,7 @@ test('bash timeout kills the whole process group, not just the shell', async () 
 });
 
 test('run_code runs in the workspace root so relative imports work, with quotes intact', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-run-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alien-run-'));
   fs.writeFileSync(path.join(root, 'package.json'), '{"type":"module"}');
   fs.writeFileSync(path.join(root, 'a.js'), "export const who = 'mundo';\n");
   const ctx = context(root);
@@ -129,7 +129,7 @@ test('run_code runs in the workspace root so relative imports work, with quotes 
 });
 
 test('run_code in node calls the read-only tools and bash by RPC; only what it prints comes back', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-rpc-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alien-rpc-'));
   fs.writeFileSync(path.join(root, 'a.ts'), 'export const alpha = 1;\n');
   fs.writeFileSync(path.join(root, 'b.ts'), 'export const beta = 2;\n');
   const ctx = context(root);
@@ -158,7 +158,7 @@ test('run_code in node calls the read-only tools and bash by RPC; only what it p
 });
 
 test('creating a numbered file whose number is taken warns with the next free number', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-num-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alien-num-'));
   fs.mkdirSync(path.join(root, 'db/init'), { recursive: true });
   fs.writeFileSync(path.join(root, 'db/init/001_drivers.sql'), '');
   fs.writeFileSync(path.join(root, 'db/init/002-vehicles.sql'), '');
@@ -176,7 +176,7 @@ test('test guard: existing assertions are read-only unless the request asks to c
   assert.equal(allowsTestEdits('Depois rode npm test e garanta que passe.'), false);
   assert.equal(allowsTestEdits('Os testes em test_slug.py precisam passar.'), false);
 
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-guard-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alien-guard-'));
   const test = "import assert from 'node:assert/strict';\nassert.equal(calcTotal([1, 2]), 3);\nassert.equal(discount(100, 10), 85);\n";
   fs.writeFileSync(path.join(root, 'test.mjs'), test);
   const ctx = { ...context(root), testEditsAllowed: false };

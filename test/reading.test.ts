@@ -11,7 +11,7 @@ function context(root: string): ToolContext {
 }
 
 test('read_file: a big file without a range comes back as an outline plus the first 100 lines', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-read-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alien-read-'));
   const body = Array.from({ length: 400 }, (_, k) => (k === 250 ? 'export function target(x: number) {' : `  const v${k} = ${k};`));
   fs.writeFileSync(path.join(root, 'big.ts'), body.join('\n'));
   const out = await tool('read_file').run({ path: 'big.ts' }, context(root));
@@ -24,7 +24,7 @@ test('read_file: a big file without a range comes back as an outline plus the fi
 });
 
 test('grep: many matches come back summarized per file; few matches come back in full', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-grep-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alien-grep-'));
   for (let f = 0; f < 5; f++) fs.writeFileSync(path.join(root, `f${f}.ts`), Array.from({ length: 10 }, (_, k) => `photo ${f}.${k}`).join('\n'));
   const many = await tool('grep').run({ pattern: 'photo' }, context(root));
   assert.match(many, /^50 matches in 5 files/);

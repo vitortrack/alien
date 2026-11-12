@@ -1,5 +1,5 @@
 node_modules/
 dist/
-.trackai/
+.alien/
 .env
 eval/results/

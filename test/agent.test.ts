@@ -56,7 +56,7 @@ const call = (name: string, input: Record<string, unknown>): StepResult => ({
 const answer = (text: string): StepResult => ({ text, toolCalls: [], stop: 'end', usage });
 
 function workspace(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-test-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'alien-test-'));
 }
 
 function config(root: string, overrides: Partial<Config> = {}): Config {
@@ -78,7 +78,7 @@ function config(root: string, overrides: Partial<Config> = {}): Config {
 }
 
 process.env.OLLAMA_HOST = 'http://127.0.0.1:9';
-process.env.TRACKAI_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-home-'));
+process.env.ALIEN_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'alien-home-'));
 
 test('ReAct loop: act, observe an error, self-correct, and finish', async () => {
   const root = workspace();
@@ -88,7 +88,7 @@ test('ReAct loop: act, observe an error, self-correct, and finish', async () => 
     ({ results }) => {
       assert.equal(results.at(-1)![0]!.isError, true);
       assert.match(results.at(-1)![0]!.output, /not found/);
-      return call('edit_file', { path: 'src/app.txt', old_string: 'world', new_string: 'TrackAI' });
+      return call('edit_file', { path: 'src/app.txt', old_string: 'world', new_string: 'Alien' });
     },
     () => answer('done'),
   ]);
@@ -97,7 +97,7 @@ test('ReAct loop: act, observe an error, self-correct, and finish', async () => 
   const out = await session.run('change greeting');
   ui.close();
   assert.equal(out, 'done');
-  assert.equal(fs.readFileSync(path.join(root, 'src/app.txt'), 'utf8'), 'hello TrackAI\n');
+  assert.equal(fs.readFileSync(path.join(root, 'src/app.txt'), 'utf8'), 'hello Alien\n');
 });
 
 test('reflection: a reviewer rejection sends the agent back to work, then approval ends it', async () => {
@@ -524,7 +524,7 @@ test('toolset per provider: Claude gets bash-only, Ollama models keep the predef
 
 test('skills: Claude-compatible SKILL.md discovery, loading on demand, and no tool when there are none', async () => {
   const { findSkills, frontmatter, readSkill } = await import('../src/skills.js');
-  process.env.TRACKAI_USER_SKILLS = 'off';
+  process.env.ALIEN_USER_SKILLS = 'off';
   const root = workspace();
   const write = (f: string, c: string) => {
     fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true });
@@ -569,7 +569,7 @@ test('offload: a huge tool output is saved to a git-ignored file and the model g
     ]);
     await new Session(config(root), ui, () => provider).run('liste os números');
     const big = provider.results[0]![0]!.output;
-    const saved = /saved in (\.trackai\/outputs\/\S+\.txt)/.exec(big)?.[1];
+    const saved = /saved in (\.alien\/outputs\/\S+\.txt)/.exec(big)?.[1];
     assert.ok(saved, big.slice(3000, 3400));
     assert.ok(big.length < 7000);
     assert.match(big, /^1\n2\n3\n/);
@@ -589,7 +589,7 @@ test('offload: a huge tool output is saved to a git-ignored file and the model g
 });
 
 test('progressive tools: rare tools stay out of the prompt until load_tools or a skill that allows them', async () => {
-  process.env.TRACKAI_USER_SKILLS = 'off';
+  process.env.ALIEN_USER_SKILLS = 'off';
   const root = workspace();
   fs.mkdirSync(path.join(root, '.claude/skills/docs-lookup'), { recursive: true });
   fs.writeFileSync(path.join(root, '.claude/skills/docs-lookup/SKILL.md'), '---\nname: docs-lookup\ndescription: Use when you need to save notes.\nallowed-tools: Remember, Bash\n---\nSave the note.\n');
@@ -688,8 +688,8 @@ test('report_conflict: without anyone to answer, a question before any edit is r
   ui.close();
 });
 
-const ts5 = process.env.TRACKAI_TEST_TS5;
-test('edits that introduce type errors are reverted; unused names are only reported', { skip: !ts5 && 'set TRACKAI_TEST_TS5 to a typescript@5 folder' }, async () => {
+const ts5 = process.env.ALIEN_TEST_TS5;
+test('edits that introduce type errors are reverted; unused names are only reported', { skip: !ts5 && 'set ALIEN_TEST_TS5 to a typescript@5 folder' }, async () => {
   const root = workspace();
   fs.mkdirSync(path.join(root, 'src'));
   fs.mkdirSync(path.join(root, 'node_modules'));
@@ -808,10 +808,10 @@ test('tool descriptions state the preconditions and consequences that caused rej
   assert.match(describe('bash'), /saved to a file/);
 });
 
-test('skill review: after a long task a separate call saves a class-level skill under TrackAI home; project skills stay read-only', async () => {
+test('skill review: after a long task a separate call saves a class-level skill under Alien home; project skills stay read-only', async () => {
   const { managedSkillsDir, findSkills } = await import('../src/skills.js');
   const { saveProposal } = await import('../src/skill-review.js');
-  process.env.TRACKAI_USER_SKILLS = 'on';
+  process.env.ALIEN_USER_SKILLS = 'on';
   const root = workspace();
   fs.mkdirSync(path.join(root, '.claude/skills/project-rule'), { recursive: true });
   fs.writeFileSync(path.join(root, '.claude/skills/project-rule/SKILL.md'), '---\nname: project-rule\ndescription: Project rule.\n---\nx');
@@ -848,7 +848,7 @@ test('skill review: after a long task a separate call saves a class-level skill 
     await quiet.reviewing;
     assert.equal(short.user.length, 1);
   } finally {
-    process.env.TRACKAI_USER_SKILLS = 'off';
+    process.env.ALIEN_USER_SKILLS = 'off';
     ui.close();
   }
 });

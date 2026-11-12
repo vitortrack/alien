@@ -9,7 +9,7 @@ import type { Provider, StepRequest, StepResult, ToolResult } from '../src/types
 import { UI } from '../src/ui.js';
 
 process.env.OLLAMA_HOST = 'http://127.0.0.1:9';
-process.env.TRACKAI_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-home-'));
+process.env.ALIEN_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'alien-home-'));
 const ui = UI.create();
 after(() => ui.close());
 
@@ -36,7 +36,7 @@ class Scripted implements Provider {
 }
 
 function session(providers: Scripted[]): Session {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-judge-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alien-judge-'));
   fs.writeFileSync(path.join(root, 'a.txt'), 'hello\n');
   const cfg: Config = { provider: 'ollama', model: 'mock', mode: 'auto', root, maxSteps: 10, review: false, effort: 'high', numCtx: 8192, embedModel: 'none', tokenBudget: 0, lang: 'pt-BR', logDir: null };
   const queue: Scripted[] = [new Scripted([]), ...providers];
@@ -76,7 +76,7 @@ test('agent judge: gives up with an explanation after repeated invalid answers',
   await assert.rejects(agentJudge(session([p])).ask('compare', SCHEMA, []), /JSON/);
 });
 
-test('agent judge with tools: a read-only TrackAI agent explores the workspace and ends with the JSON', async () => {
+test('agent judge with tools: a read-only Alien agent explores the workspace and ends with the JSON', async () => {
   const explorer = new Scripted([
     () => ({ text: '', toolCalls: [{ id: 't1', name: 'read_file', input: { path: 'a.txt' } }], stop: 'tool_use', usage }),
     () => answer('{"winner":"A","notes":["read a.txt"]}'),

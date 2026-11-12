@@ -10,7 +10,7 @@ import type { Provider, StepResult, ToolResult } from '../src/types.js';
 import { UI } from '../src/ui.js';
 
 process.env.OLLAMA_HOST = 'http://127.0.0.1:9';
-process.env.TRACKAI_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-home-'));
+process.env.ALIEN_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'alien-home-'));
 
 const usage = { input: 1, output: 1 };
 const write = (p: string, content: string): StepResult => ({
@@ -35,7 +35,7 @@ test('pickBest prefers finished, tested, smallest diffs', () => {
 });
 
 test('bestOf runs isolated attempts, applies only the smallest passing one and cleans up', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-best-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alien-best-'));
   const sh = (...args: string[]) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd: root, encoding: 'utf8' });
   fs.writeFileSync(path.join(root, 'package.json'), '{"type":"module","scripts":{"test":"node test.mjs"}}');
   fs.writeFileSync(path.join(root, 'test.mjs'), "import fs from 'node:fs'; if (!fs.existsSync('feature.js')) process.exit(1);\n");

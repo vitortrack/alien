@@ -25,7 +25,7 @@ type Candidate = {
 export type BestOfResult = { answer: string; summary: string; usage: Usage };
 
 async function git(cwd: string, ...args: string[]): Promise<string> {
-  const { stdout } = await execFileP('git', ['-c', 'user.email=trackai@local', '-c', 'user.name=TrackAI', ...args], {
+  const { stdout } = await execFileP('git', ['-c', 'user.email=alien@local', '-c', 'user.name=Alien', ...args], {
     cwd,
     maxBuffer: 200_000_000,
   });
@@ -51,7 +51,7 @@ async function linkDependencies(root: string, dir: string): Promise<void> {
 }
 
 async function createWorkspace(root: string, index: number): Promise<string> {
-  const dir = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'trackai-attempt-')), `attempt-${index}`);
+  const dir = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'alien-attempt-')), `attempt-${index}`);
   await git(root, 'worktree', 'add', '--detach', dir, 'HEAD');
   const pending = await git(root, 'diff', 'HEAD', '--binary');
   if (pending.trim()) {
@@ -65,7 +65,7 @@ async function createWorkspace(root: string, index: number): Promise<string> {
     await fs.copyFile(path.join(root, file), path.join(dir, file));
   }
   await git(dir, 'add', '-A');
-  await git(dir, 'commit', '-q', '--allow-empty', '--no-verify', '-m', 'trackai attempt base');
+  await git(dir, 'commit', '-q', '--allow-empty', '--no-verify', '-m', 'alien attempt base');
   await linkDependencies(root, dir);
   return dir;
 }

@@ -13,11 +13,11 @@ import { DEFAULT_EMBED_MODEL, DEFAULT_MODEL, Session, type Config } from './sess
 import type { Mode } from './tools.js';
 import { UI } from './ui.js';
 
-const HELP = `TrackAI — agente de código autônomo (ReAct + planejamento + reflexão + multiagente + RAG)
+const HELP = `Alien — agente de código autônomo (ReAct + planejamento + reflexão + multiagente + RAG)
 
 Uso:
-  trackai [opções] "tarefa"      executa a tarefa e sai
-  trackai [opções]               modo interativo
+  alien [opções] "tarefa"      executa a tarefa e sai
+  alien [opções]               modo interativo
 
 Opções:
   -p, --provider <ollama|anthropic>  padrão: anthropic com ANTHROPIC_API_KEY, senão ollama
@@ -39,13 +39,13 @@ Opções:
       --embed-model <nome>           modelo de embedding do Ollama (padrão: ${DEFAULT_EMBED_MODEL})
       --lang <idioma>                idioma das respostas e interações: pt-BR, en, es, fr, de, it, auto (padrão: pt-BR)
       --thinking                     mostra o raciocínio do modelo (padrão: escondido)
-      --no-log                       não grava o trace em ~/.trackai/sessions
+      --no-log                       não grava o trace em ~/.alien/sessions
   -c, --continue                     retoma a última conversa deste projeto
   -r, --resume <id>                  retoma uma conversa salva (veja /sessions)
       --fork                         com -c ou -r: continua numa cópia, sem alterar a original
   -h, --help
 
-Variáveis: OLLAMA_HOST, ANTHROPIC_API_KEY, TRACKAI_MODEL, TRACKAI_EMBED_MODEL, TRACKAI_LANG`;
+Variáveis: OLLAMA_HOST, ANTHROPIC_API_KEY, ALIEN_MODEL, ALIEN_EMBED_MODEL, ALIEN_LANG`;
 
 const COMMANDS = `Comandos:
   /plan                    mostra o plano atual
@@ -65,7 +65,7 @@ const COMMANDS = `Comandos:
   /exit`;
 
 function fail(message: string): never {
-  console.error(`trackai: ${message}\nUse --help para ver as opções.`);
+  console.error(`alien: ${message}\nUse --help para ver as opções.`);
   process.exit(2);
 }
 
@@ -138,17 +138,17 @@ function parseConfig(): { cfg: Config; task: string; orchestrateTask: boolean; g
   return {
     cfg: {
       provider,
-      model: values.model ?? process.env.TRACKAI_MODEL ?? DEFAULT_MODEL[provider],
+      model: values.model ?? process.env.ALIEN_MODEL ?? DEFAULT_MODEL[provider],
       mode: oneOf(values.mode, ['ask', 'auto', 'read-only'] as const, '--mode', 'ask'),
       root,
       maxSteps: positiveInt(values['max-steps'], '--max-steps', 80),
       review: Boolean(values.review) && !values['no-review'],
       effort: oneOf<Effort>(values.effort, ['low', 'medium', 'high', 'xhigh', 'max'], '--effort', 'high'),
       numCtx: positiveInt(values['num-ctx'], '--num-ctx', 65536),
-      embedModel: values['embed-model'] ?? process.env.TRACKAI_EMBED_MODEL ?? DEFAULT_EMBED_MODEL,
+      embedModel: values['embed-model'] ?? process.env.ALIEN_EMBED_MODEL ?? DEFAULT_EMBED_MODEL,
       tokenBudget: positiveInt(values.budget, '--budget', 0),
       interactive: positionals.length === 0,
-      lang: validLang(values.lang ?? process.env.TRACKAI_LANG ?? 'pt-BR', '--lang'),
+      lang: validLang(values.lang ?? process.env.ALIEN_LANG ?? 'pt-BR', '--lang'),
       logDir: values['no-log'] ? null : Session.defaultLogDir(),
       ...(values.handoff ? { handoff: path.resolve(values.handoff) } : {}),
       ...(values.harness ? { harness: fs.readFileSync(path.resolve(values.harness), 'utf8') } : {}),

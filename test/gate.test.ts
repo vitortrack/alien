@@ -9,7 +9,7 @@ import { gateFor, MINIMAL_DIFF, orderedChecks } from '../src/gate.js';
 import { digest } from '../src/rhi.js';
 
 function repo(): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-gate-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alien-gate-'));
   fs.writeFileSync(path.join(root, 'a.txt'), 'old\n');
   execFileSync('git', ['init', '-q'], { cwd: root });
   execFileSync('git', ['add', '.'], { cwd: root });
@@ -39,7 +39,7 @@ test('gate: written in one call from the request and the file list, without tool
     { text: 'broken guard', check: 'false', guard: true },
   ];
   const j = judge({ slices: [{ title: 'all', spec: '', files: [], criteria: checks }] });
-  const file = path.join(root, '.trackai', 'gate.json');
+  const file = path.join(root, '.alien', 'gate.json');
   const gate = await gateFor(root, 'make a.txt say new', j, file);
   assert.deepEqual(gate.map((c) => c.text), ['a.txt says new', 'build passes', MINIMAL_DIFF.text]);
   assert.deepEqual(j.tools[0], []);
@@ -76,7 +76,7 @@ test('gate: cheap criteria run first and the slow guards only when every criteri
 });
 
 test('digest: the reference documents are summarized for the request, inline and without tools', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-docs-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'alien-docs-'));
   const doc = path.join(dir, 'spike.txt');
   fs.writeFileSync(doc, 'LADO = 472\nirrelevant history');
   const j = judge({ digest: '- LADO = 472 (spike.txt)' });

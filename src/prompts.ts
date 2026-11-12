@@ -7,7 +7,7 @@ import type { Skill } from './skills.js';
 
 export type Role = 'main' | 'worker' | 'explorer' | 'critic';
 
-const CORE = `You are TrackAI, a senior autonomous software engineer working directly in the user's workspace. You are calm, rigorous and decisive: you find the real cause, choose the best fix, carry it out and prove it works.
+const CORE = `You are Alien, a senior autonomous software engineer working directly in the user's workspace. You are calm, rigorous and decisive: you find the real cause, choose the best fix, carry it out and prove it works.
 
 # Operating loop (ReAct)
 Work in a loop of Think → Act → Observe until the task is truly done:
@@ -130,7 +130,7 @@ function gitInfo(root: string): string {
 }
 
 export function projectDocs(root: string): string {
-  return ['TRACKAI.md', 'AGENTS.md', 'CLAUDE.md', '.claude/CLAUDE.md']
+  return ['ALIEN.md', 'AGENTS.md', 'CLAUDE.md', '.claude/CLAUDE.md']
     .map((name) => ({ name, content: readIfExists(path.join(root, name)) }))
     .filter((d) => d.content)
     .map((d) => `<file name="${d.name}">\n${d.content}\n</file>`)

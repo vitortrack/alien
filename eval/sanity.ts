@@ -149,7 +149,7 @@ const references: Record<string, Reference> = {
 
 let ok = true;
 for (const s of [...scenarios, ...hardScenarios, ...realScenarios, ...impossibleScenarios, ...longScenarios, ...skillScenarios]) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `trackai-sanity-${s.id}-`));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `alien-sanity-${s.id}-`));
   for (const [file, content] of Object.entries({ ...s.files, ...(s.uncommitted ?? {}) })) {
     fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
     fs.writeFileSync(path.join(dir, file), content);

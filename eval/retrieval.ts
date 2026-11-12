@@ -65,7 +65,7 @@ async function evaluate(index: CodeIndex, queries: { q: string; expect: string[]
   return { hit1: m.hit1 / n, hit3: m.hit3 / n, hit5: m.hit5 / n, mrr: m.mrr / n };
 }
 
-const home = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-retrieval-'));
+const home = fs.mkdtempSync(path.join(os.tmpdir(), 'alien-retrieval-'));
 const row = (name: string, m: Metrics) =>
   console.log(`${name.padEnd(46)} ${(m.hit1 * 100).toFixed(0).padStart(4)}% ${(m.hit3 * 100).toFixed(0).padStart(5)}% ${(m.hit5 * 100).toFixed(0).padStart(5)}%  ${m.mrr.toFixed(3)}`);
 
@@ -76,7 +76,7 @@ const expanded = await Promise.all(QUERIES.map(async ({ q, expect }) => ({ q: `$
 
 for (const model of values.models!.split(',')) {
   {
-    process.env.TRACKAI_HOME = path.join(home, model.replace(/[:/]/g, '_'));
+    process.env.ALIEN_HOME = path.join(home, model.replace(/[:/]/g, '_'));
     const embedder = new Embedder(model);
     const build = new CodeIndex(values.root!, embedder, { pattern: '{api/src,web/src}/**/*' });
     const started = Date.now();
@@ -95,7 +95,7 @@ for (const model of values.models!.split(',')) {
   }
 }
 
-process.env.TRACKAI_HOME = path.join(home, 'lexical');
+process.env.ALIEN_HOME = path.join(home, 'lexical');
 const lexical = new CodeIndex(values.root!, new Embedder('no-such-model'), { pattern: '{api/src,web/src}/**/*' });
 row('só BM25', await evaluate(lexical, QUERIES));
 row('só BM25 · +expansão', await evaluate(lexical, expanded));

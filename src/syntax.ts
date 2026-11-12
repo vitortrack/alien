@@ -40,7 +40,7 @@ export async function syntaxError(file: string, content: string): Promise<string
     }
   }
   if (ext === '.py') {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'trackai-syntax-'));
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'alien-syntax-'));
     const tmp = path.join(dir, 'check.py');
     try {
       await fs.writeFile(tmp, content);

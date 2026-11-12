@@ -1,13 +1,13 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { trackaiHome } from './paths.js';
+import { alienHome } from './paths.js';
 
 export type Skill = { name: string; description: string; dir: string; tools: string[] };
 
 const MAX_DESCRIPTION = 300;
 
-export const managedSkillsDir = (): string => path.join(trackaiHome(), 'skills');
+export const managedSkillsDir = (): string => path.join(alienHome(), 'skills');
 
 export function frontmatter(text: string): { fields: Record<string, string>; body: string } {
   const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
@@ -30,7 +30,7 @@ export function frontmatter(text: string): { fields: Record<string, string>; bod
 
 function skillDirs(root: string): string[] {
   const dirs = [path.join(root, '.claude', 'skills'), path.join(root, '.agents', 'skills')];
-  if (process.env.TRACKAI_USER_SKILLS !== 'off') dirs.push(path.join(os.homedir(), '.claude', 'skills'), managedSkillsDir());
+  if (process.env.ALIEN_USER_SKILLS !== 'off') dirs.push(path.join(os.homedir(), '.claude', 'skills'), managedSkillsDir());
   return dirs;
 }
 

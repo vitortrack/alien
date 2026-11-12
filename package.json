@@ -1,10 +1,10 @@
 {
-  "name": "trackai",
+  "name": "alien",
   "version": "0.1.0",
   "description": "Agente de código autônomo (ReAct) com planejamento, ferramentas, reflexão e orquestração multiagente — roda local com Ollama ou com Claude.",
   "type": "module",
   "bin": {
-    "trackai": "dist/index.js"
+    "alien": "dist/index.js"
   },
   "files": [
     "dist"
@@ -25,7 +25,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/vitortrack/track-ai.git"
+    "url": "https://github.com/vitortrack/alien.git"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.6.0",

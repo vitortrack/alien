@@ -1,13 +1,13 @@
 {
-  "name": "trackai",
-  "displayName": "TrackAI",
+  "name": "alien",
+  "displayName": "Alien",
   "description": "Agente de código autônomo em formato de chat: ReAct, planejamento, revisão independente, multiagente, RAG e memória — local com Ollama ou com Claude.",
   "version": "0.1.0",
-  "publisher": "trackai-local",
+  "publisher": "alien-local",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/vitortrack/track-ai.git",
+    "url": "https://github.com/vitortrack/alien.git",
     "directory": "vscode"
   },
   "icon": "media/icon.png",
@@ -24,45 +24,45 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "trackai",
-          "title": "TrackAI",
+          "id": "alien",
+          "title": "Alien",
           "icon": "media/icon.svg"
         }
       ]
     },
     "views": {
-      "trackai": [
+      "alien": [
         {
           "type": "webview",
-          "id": "trackai.chat",
+          "id": "alien.chat",
           "name": "Chat"
         }
       ]
     },
     "commands": [
       {
-        "command": "trackai.newChat",
-        "title": "TrackAI: Nova conversa",
+        "command": "alien.newChat",
+        "title": "Alien: Nova conversa",
         "icon": "$(add)"
       },
       {
-        "command": "trackai.focus",
-        "title": "TrackAI: Abrir chat"
+        "command": "alien.focus",
+        "title": "Alien: Abrir chat"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "trackai.newChat",
-          "when": "view == trackai.chat",
+          "command": "alien.newChat",
+          "when": "view == alien.chat",
           "group": "navigation"
         }
       ]
     },
     "configuration": {
-      "title": "TrackAI",
+      "title": "Alien",
       "properties": {
-        "trackai.provider": {
+        "alien.provider": {
           "type": "string",
           "enum": [
             "auto",
@@ -72,12 +72,12 @@
           "default": "auto",
           "description": "Provedor do modelo. auto = Claude se houver ANTHROPIC_API_KEY, senão Ollama."
         },
-        "trackai.model": {
+        "alien.model": {
           "type": "string",
           "default": "",
           "description": "Modelo de chat. Vazio = glm-5.3-flash:cloud (Ollama) ou claude-opus-5-5 (Claude)."
         },
-        "trackai.mode": {
+        "alien.mode": {
           "type": "string",
           "enum": [
             "ask",
@@ -92,27 +92,27 @@
           ],
           "description": "Permissões do agente."
         },
-        "trackai.lang": {
+        "alien.lang": {
           "type": "string",
           "default": "pt-BR",
           "description": "Idioma das respostas: pt-BR, en, es, fr, de, it ou auto (o da pergunta)."
         },
-        "trackai.review": {
+        "alien.review": {
           "type": "boolean",
           "default": false,
           "description": "Revisão extra por um agente crítico quando há alterações. Desligada por padrão: nas medições deu o mesmo acerto com 19–38% mais tokens; a checagem de escopo e o portão de verificação continuam sempre ativos."
         },
-        "trackai.maxSteps": {
+        "alien.maxSteps": {
           "type": "number",
           "default": 80,
           "description": "Limite de passos por agente."
         },
-        "trackai.embedModel": {
+        "alien.embedModel": {
           "type": "string",
           "default": "qwen3-embedding:0.6b",
           "description": "Modelo de embedding do Ollama para RAG e memória."
         },
-        "trackai.ollamaHost": {
+        "alien.ollamaHost": {
           "type": "string",
           "default": "http://localhost:11434",
           "description": "Endereço do Ollama."

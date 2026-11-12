@@ -111,10 +111,10 @@ async function main(): Promise<void> {
   });
   const read = (file: string | undefined): string => (file && fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '');
   const provider = process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN ? 'anthropic' : 'ollama';
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trackai-rhi-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alien-rhi-'));
   const ui = UI.create();
   const session = new Session(
-    { provider, model: process.env.TRACKAI_MODEL ?? DEFAULT_MODEL[provider], mode: 'read-only', root, maxSteps: 40, review: false, effort: 'high', numCtx: 65536, embedModel: DEFAULT_EMBED_MODEL, tokenBudget: 0, lang: 'en', logDir: null },
+    { provider, model: process.env.ALIEN_MODEL ?? DEFAULT_MODEL[provider], mode: 'read-only', root, maxSteps: 40, review: false, effort: 'high', numCtx: 65536, embedModel: DEFAULT_EMBED_MODEL, tokenBudget: 0, lang: 'en', logDir: null },
     ui,
   );
   const judge = agentJudge(session);
