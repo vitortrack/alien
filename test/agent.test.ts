@@ -852,3 +852,22 @@ test('skill review: after a long task a separate call saves a class-level skill 
     ui.close();
   }
 });
+test('a message sent while the agent works reaches it at the next step and joins the request', async () => {
+  const root = workspace();
+  let session!: Session;
+  const provider = new ScriptedProvider([
+    () => {
+      session.queue('use port 8081');
+      return call('list_dir', { path: '.' });
+    },
+    ({ user }) => {
+      assert.match(user.at(-1)!, /use port 8081/);
+      return answer('done');
+    },
+  ]);
+  const ui = UI.create();
+  session = new Session(config(root), ui, () => provider);
+  await session.run('start the server');
+  ui.close();
+  assert.equal(session.turns[0]!.task, 'start the server\n\nuse port 8081');
+});

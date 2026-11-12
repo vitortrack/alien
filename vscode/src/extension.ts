@@ -149,6 +149,7 @@ async function localModels(current: string): Promise<string[]> {
 class ChatViewProvider implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
   private session: Session | undefined;
+  private plainRun = false;
   private readonly pending: Pending = new Map();
 
   constructor(
@@ -299,7 +300,12 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
     const session = this.ensureSession();
     if (!session) return;
     if (session.busy) {
-      this.post({ type: 'warn', message: 'Aguarde a tarefa atual terminar ou clique em Parar.' });
+      if (!this.plainRun || attachments.length || viaOrchestrator || best3) {
+        this.post({ type: 'warn', message: 'Aguarde a tarefa atual terminar ou clique em Parar.' });
+        return;
+      }
+      session.queue(task);
+      this.post({ type: 'info', message: 'Mensagem entregue ao agente no próximo passo.' });
       return;
     }
     const { lines, images } = saveAttachments(session.cfg.root, attachments);
@@ -321,7 +327,8 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
         session.addUsage(result.usage);
         out = result.answer;
       } else {
-        out = await session.run(task, images);
+        this.plainRun = true;
+        out = await session.run(task, images).finally(() => (this.plainRun = false));
         void this.state.update(OPEN_SESSION, session.id);
       }
       if (STOP_PREFIXES.some((p) => out.startsWith(p))) report = { type: 'warn', message: out };
@@ -335,6 +342,8 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
     const cost = session.costUsd();
     this.post({ type: 'usage', input: session.usage.input, output: session.usage.output, cost });
     this.post({ type: 'busy', value: false });
+    const leftover = session.takeQueued();
+    if (leftover.length && report.type === 'answer') await this.send(leftover.join('\n\n'), false, false, []);
   }
 
   private async open(file: string, line: number): Promise<void> {

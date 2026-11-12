@@ -329,7 +329,6 @@
 
   function setBusy(busy) {
     stopBtn.hidden = !busy;
-    sendBtn.disabled = busy;
     modelSel.disabled = busy;
     if (busy) startWork();
     else finishWork('stopped');
@@ -449,7 +448,7 @@
 
   function send() {
     const text = input.value.trim();
-    if ((!text && !attached.length) || sendBtn.disabled) return;
+    if (!text && !attached.length) return;
     messages.querySelector('.welcome')?.remove();
     stick = true;
     const names = attached.length ? `<div class="muted">📎 ${attached.map((a) => esc(a.name)).join(', ')}</div>` : '';

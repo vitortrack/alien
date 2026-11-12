@@ -81,6 +81,8 @@ export class Session {
   turns: Turn[] = [];
   private created = new Date().toISOString();
   reviewing: Promise<void> = Promise.resolve();
+  private queued: string[] = [];
+  private injected: string[] = [];
 
   constructor(
     readonly cfg: Config,
@@ -197,10 +199,21 @@ export class Session {
       .catch((e: unknown) => this.log({ event: 'skill-review-failed', error: e instanceof Error ? e.message : String(e) }));
   }
 
+  queue(text: string): void {
+    this.queued.push(text);
+  }
+
+  takeQueued(): string[] {
+    const taken = this.queued.splice(0);
+    this.injected.push(...taken);
+    return taken;
+  }
+
   run(task: string, images: Image[] = []): Promise<string> {
     return this.track(async () => {
+      this.injected = [];
       const answer = await this.main.run(task, images);
-      this.turns.push({ task, answer });
+      this.turns.push({ task: [task, ...this.injected].join('\n\n'), answer });
       this.save();
       return answer;
     });

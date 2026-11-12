@@ -168,6 +168,13 @@ export class Agent {
     try {
       for (let step = 1; step <= cfg.maxSteps; step++) {
         this.step = step;
+        if (this.role === 'main') {
+          for (const message of this.session.takeQueued()) {
+            this.provider.addUser(`[message from the user while you work: it adds to or changes the request; follow it from now on]\n${message}`);
+            task += `\n\n${message}`;
+            this.session.log({ agent: this.role, event: 'queued-message', message });
+          }
+        }
         if (this.session.overBudget()) return `Orçamento de ${cfg.tokenBudget.toLocaleString('pt-BR')} tokens atingido; parei para não gastar além do limite.`;
         const r = await this.provider.step({
           system: this.system,
