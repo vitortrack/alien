@@ -4,6 +4,7 @@ import { Agent } from './agent.js';
 import type { Criterion } from './contract.js';
 import { MemoryStore } from './memory.js';
 import { findSkills, type Skill } from './skills.js';
+import { reviewSkills, type ReviewInput } from './skill-review.js';
 import type { Role } from './prompts.js';
 import { AnthropicProvider, type Effort } from './providers/anthropic.js';
 import { trackaiHome } from './paths.js';
@@ -79,6 +80,7 @@ export class Session {
   id = newSessionId();
   turns: Turn[] = [];
   private created = new Date().toISOString();
+  reviewing: Promise<void> = Promise.resolve();
 
   constructor(
     readonly cfg: Config,
@@ -180,6 +182,19 @@ export class Session {
       parent,
     );
     return { approved: !/CHANGES_REQUESTED/.test(feedback), feedback };
+  }
+
+  reviewSkills(input: Omit<ReviewInput, 'turns'>): void {
+    if (process.env.TRACKAI_USER_SKILLS === 'off') return;
+    const signal = this.signal;
+    const turns = [...this.turns];
+    this.reviewing = this.reviewing
+      .then(() => reviewSkills(this.newProvider(), this.skills, { ...input, turns }, signal))
+      .then(({ usage, saved }) => {
+        this.addUsage(usage);
+        this.log({ event: 'skill-review', saved });
+      })
+      .catch((e: unknown) => this.log({ event: 'skill-review-failed', error: e instanceof Error ? e.message : String(e) }));
   }
 
   run(task: string, images: Image[] = []): Promise<string> {

@@ -544,6 +544,9 @@ test('offload: a huge tool output is saved to a git-ignored file and the model g
     assert.ok(saved, big.slice(3000, 3400));
     assert.ok(big.length < 7000);
     assert.match(big, /^1\n2\n3\n/);
+    const [head, tail] = big.split(/\n\.\.\. \[output too long[^\n]*\] \.\.\.\n/);
+    assert.equal(head!.length, 2400);
+    assert.equal(tail!.length, 3600);
     assert.match(big, /50000\n\[exit code 0\]$/);
     assert.match(big, /grep it or read the lines you need with read_file/);
     const full = fs.readFileSync(path.join(root, saved), 'utf8');
@@ -560,13 +563,13 @@ test('progressive tools: rare tools stay out of the prompt until load_tools or a
   process.env.TRACKAI_USER_SKILLS = 'off';
   const root = workspace();
   fs.mkdirSync(path.join(root, '.claude/skills/docs-lookup'), { recursive: true });
-  fs.writeFileSync(path.join(root, '.claude/skills/docs-lookup/SKILL.md'), '---\nname: docs-lookup\ndescription: Use when you need external docs.\nallowed-tools: WebFetch, Bash\n---\nFetch the docs page.\n');
+  fs.writeFileSync(path.join(root, '.claude/skills/docs-lookup/SKILL.md'), '---\nname: docs-lookup\ndescription: Use when you need to save notes.\nallowed-tools: Remember, Bash\n---\nSave the note.\n');
   const ui = UI.create();
   const offered: string[][] = [];
   try {
     const provider = new ScriptedProvider([
-      () => call('run_code', { language: 'node', code: 'console.log(6 * 7)' }),
-      () => call('load_tools', { group: 'scripts' }),
+      () => call('web_fetch', { url: 'http://127.0.0.1:9' }),
+      () => call('load_tools', { group: 'web' }),
       () => call('run_code', { language: 'node', code: 'console.log(6 * 7)' }),
       () => call('skill', { name: 'docs-lookup' }),
       () => answer('ok'),
@@ -578,14 +581,14 @@ test('progressive tools: rare tools stay out of the prompt until load_tools or a
     });
     await session.run('quanto é 6 vezes 7?');
     const [first, , third] = provider.results.map((r) => r[0]!);
-    assert.match(first!.output, /^Unknown tool "run_code"\. Available tools: .*\bload_tools\b/);
-    for (const hidden of ['run_code', 'web_fetch', 'remember']) assert.ok(!offered[0]!.includes(hidden), hidden);
-    assert.ok(offered[0]!.includes('semantic_search') && offered[0]!.includes('recall'));
-    assert.match(provider.results[1]![0]!.output, /^Loaded: run_code\./);
+    assert.match(first!.output, /^Unknown tool "web_fetch"\. Available tools: .*\bload_tools\b/);
+    for (const hidden of ['web_fetch', 'remember']) assert.ok(!offered[0]!.includes(hidden), hidden);
+    assert.ok(offered[0]!.includes('semantic_search') && offered[0]!.includes('recall') && offered[0]!.includes('run_code'));
+    assert.match(provider.results[1]![0]!.output, /^Loaded: web_fetch\./);
     assert.equal(third!.isError, false);
     assert.match(third!.output, /^42\n/);
-    assert.match(provider.results[3]![0]!.output, /\[tools\] Loaded for this skill: web_fetch\.$/);
-    assert.ok(offered[4]!.includes('web_fetch') && !offered[4]!.includes('remember'));
+    assert.match(provider.results[3]![0]!.output, /\[tools\] Loaded for this skill: remember\.$/);
+    assert.ok(offered[4]!.includes('web_fetch') && offered[4]!.includes('remember'));
 
     const pinned = new ScriptedProvider([() => answer('ok')]);
     const seen: string[][] = [];
@@ -774,4 +777,49 @@ test('tool descriptions state the preconditions and consequences that caused rej
   assert.match(describe('write_file'), /reverted/);
   assert.match(describe('bash'), /does not change any file/);
   assert.match(describe('bash'), /saved to a file/);
+});
+
+test('skill review: after a long task a separate call saves a class-level skill under TrackAI home; project skills stay read-only', async () => {
+  const { managedSkillsDir, findSkills } = await import('../src/skills.js');
+  const { saveProposal } = await import('../src/skill-review.js');
+  process.env.TRACKAI_USER_SKILLS = 'on';
+  const root = workspace();
+  fs.mkdirSync(path.join(root, '.claude/skills/project-rule'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.claude/skills/project-rule/SKILL.md'), '---\nname: project-rule\ndescription: Project rule.\n---\nx');
+  const ui = UI.create();
+  try {
+    const long = Array.from({ length: 10 }, () => () => call('status', {}));
+    const main = new ScriptedProvider([...long, () => answer('feito')]);
+    const seen: string[] = [];
+    const reviewer = new ScriptedProvider([
+      ({ user, system }) => (seen.push(system, user.at(-1)!), answer('{"name": "status-polling", "description": "Use when tracking step budget.", "body": "# Steps\\nCall status once."}')),
+    ]);
+    const factories = [main, reviewer];
+    const session = new Session(config(root, { maxSteps: 20 }), ui, () => factories.shift() ?? main);
+    assert.equal(await session.run('acompanhe o orçamento'), 'feito');
+    await session.reviewing;
+    assert.match(seen[0]!, /CLASS-LEVEL skill/);
+    assert.match(seen[1]!, /- project-rule \(read-only\): Project rule\./);
+    assert.match(seen[1]!, /<task>\nacompanhe o orçamento\n<\/task>/);
+    assert.match(seen[1]!, /✓ status \n/);
+    const file = path.join(managedSkillsDir(), 'status-polling', 'SKILL.md');
+    assert.equal(fs.readFileSync(file, 'utf8'), '---\nname: status-polling\ndescription: Use when tracking step budget.\n---\n\n# Steps\nCall status once.\n');
+    assert.ok(findSkills(root).some((s) => s.name === 'status-polling'));
+
+    const skills = findSkills(root);
+    assert.equal(saveProposal({ name: 'project-rule', description: 'd', body: 'b' }, skills), null);
+    assert.equal(saveProposal({ name: 'Card-746 fix', description: 'd', body: 'b' }, skills), null);
+    assert.equal(saveProposal({ name: null }, skills), null);
+    assert.match(saveProposal({ name: 'status-polling', description: 'Updated.', body: 'New body' }, skills)!, /status-polling\/SKILL\.md$/);
+    assert.match(fs.readFileSync(file, 'utf8'), /description: Updated\.\n---\n\nNew body\n$/);
+
+    const short = new ScriptedProvider([() => answer('ok')]);
+    const quiet = new Session(config(workspace()), ui, () => short);
+    await quiet.run('x');
+    await quiet.reviewing;
+    assert.equal(short.user.length, 1);
+  } finally {
+    process.env.TRACKAI_USER_SKILLS = 'off';
+    ui.close();
+  }
 });

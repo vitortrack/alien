@@ -24,6 +24,8 @@ const COMPACT_AT = 0.75;
 const KEEP_FULL_OBSERVATIONS = 10;
 const ELIDE_BLOCK = 10;
 const ELIDE_OVER = 1500;
+const DEDUP_OVER = 200;
+const ARG_OVER = 1000;
 const CLOUD_CTX_CAP = 262_144;
 const KEEP_RECENT = 8;
 const COMPACT_MAX_TOKENS = 150_000;
@@ -36,6 +38,13 @@ function parseArgs(raw: Record<string, unknown> | string): Record<string, unknow
   } catch {
     return { __invalid_json__: raw };
   }
+}
+
+function shrinkArgs(call: OllamaToolCall): OllamaToolCall {
+  const args = call.function.arguments;
+  if (typeof args === 'string') return call;
+  const short = Object.fromEntries(Object.entries(args).map(([k, v]) => [k, typeof v === 'string' && v.length > ARG_OVER ? `${v.slice(0, 300)}… [${v.length - 300} characters elided]` : v]));
+  return { function: { ...call.function, arguments: short } };
 }
 
 export function parseInlineToolCalls(text: string, toolNames: Set<string>): OllamaToolCall[] {
@@ -145,14 +154,17 @@ export class OllamaProvider implements Provider {
   }
 
   private withElidedObservations(): OllamaMessage[] {
-    const tools = this.history.flatMap((m, i) => (m.role === 'tool' ? [i] : []));
-    const masked = Math.floor(Math.max(0, tools.length - KEEP_FULL_OBSERVATIONS) / ELIDE_BLOCK) * ELIDE_BLOCK;
-    const elide = new Set(tools.slice(0, masked));
-    return this.history.map((m, i) =>
-      !elide.has(i) || m.content.length <= ELIDE_OVER
-        ? m
-        : { ...m, content: `${m.content.slice(0, 600)}\n… [older tool output elided to save context; run the tool again if you need it]` },
-    );
+    const olderBlocks = (indices: number[]) => new Set(indices.slice(0, Math.floor(Math.max(0, indices.length - KEEP_FULL_OBSERVATIONS) / ELIDE_BLOCK) * ELIDE_BLOCK));
+    const elide = olderBlocks(this.history.flatMap((m, i) => (m.role === 'tool' ? [i] : [])));
+    const shrink = olderBlocks(this.history.flatMap((m, i) => (m.tool_calls?.length ? [i] : [])));
+    const newest = new Map<string, number>();
+    this.history.forEach((m, i) => m.role === 'tool' && m.content.length > DEDUP_OVER && newest.set(m.content, i));
+    return this.history.map((m, i) => {
+      if (m.role === 'tool' && (newest.get(m.content) ?? i) !== i) return { ...m, content: '[identical to a later output of this tool; see the latest copy]' };
+      if (shrink.has(i)) return { ...m, tool_calls: m.tool_calls!.map(shrinkArgs) };
+      if (!elide.has(i) || m.content.length <= ELIDE_OVER) return m;
+      return { ...m, content: `${m.content.slice(0, 600)}\n… [older tool output elided to save context; run the tool again if you need it]` };
+    });
   }
 
   private async post(body: object, signal: AbortSignal): Promise<Response> {

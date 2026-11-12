@@ -17,11 +17,10 @@ export type PlanStatus = 'pending' | 'in_progress' | 'done';
 export type PlanItem = { step: string; status: PlanStatus };
 export type DelegateRole = 'explorer' | 'worker';
 export type Decision = 'yes' | 'no' | 'always';
-export type ToolGroup = 'web' | 'scripts' | 'memory';
+export type ToolGroup = 'web' | 'memory';
 
 const TOOL_GROUPS: Record<ToolGroup, string> = {
   web: 'fetches a URL (documentation, APIs)',
-  scripts: 'runs a short Python or Node.js script',
   memory: 'saves notes for future sessions',
 };
 
@@ -48,7 +47,10 @@ export interface Tool extends ToolSpec {
 }
 
 const MAX_OUTPUT = 20_000;
-const OFFLOAD_PREVIEW = 3_000;
+const OFFLOAD_HEAD = 2_400;
+const OFFLOAD_TAIL = 3_600;
+const RPC_TOOLS = ['read_file', 'grep', 'glob', 'list_dir', 'bash'];
+const MAX_RPC_CALLS = 50;
 const SCRATCH_DIR = '.trackai';
 const OUTLINE_OVER = 300;
 const WINDOW = 100;
@@ -106,7 +108,7 @@ export async function offload(text: string, root: string, name: string): Promise
   const scratch = await writeScratch(root, name);
   await scratch.write(text);
   const lines = text.split('\n').length;
-  return `${text.slice(0, OFFLOAD_PREVIEW)}\n... [output too long: ${text.length} characters, ${lines} lines. The full output is saved in ${scratch.file}: grep it or read the lines you need with read_file offset/limit instead of running the command again] ...\n${text.slice(-OFFLOAD_PREVIEW)}`;
+  return `${text.slice(0, OFFLOAD_HEAD)}\n... [output too long: ${text.length} characters, ${lines} lines. The full output is saved in ${scratch.file}: grep it or read the lines you need with read_file offset/limit instead of running the command again] ...\n${text.slice(-OFFLOAD_TAIL)}`;
 }
 
 export function toolLoader(deferred: Tool[], load: (names: string[]) => void): Tool {
@@ -231,9 +233,36 @@ function htmlToText(html: string): string {
     .trim();
 }
 
+type RpcRequest = { id: number; name: string; args: Input };
+type RpcReply = { output: string } | { error: string };
+
+const RPC_PRELUDE =
+  "const __calls = new Map(); let __id = 0; process.on('message', (m) => { const p = __calls.get(m.id); __calls.delete(m.id); if (!__calls.size) process.channel.unref(); if ('error' in m) p.reject(new Error(m.error)); else p.resolve(m.output); }); process.channel.unref(); globalThis.tools = new Proxy({}, { get: (_, name) => (args = {}) => new Promise((resolve, reject) => { const id = ++__id; __calls.set(id, { resolve, reject }); process.channel.ref(); process.send({ id, name, args }); }) });\n";
+
+function rpcHandler(ctx: ToolContext): (m: RpcRequest) => Promise<RpcReply> {
+  let calls = 0;
+  return async (m) => {
+    if (++calls > MAX_RPC_CALLS) return { error: `Limit of ${MAX_RPC_CALLS} tool calls per script reached.` };
+    const tool = RPC_TOOLS.includes(m.name) ? allTools.find((t) => t.name === m.name) : undefined;
+    if (!tool) return { error: `tools.${m.name} is not available in run_code. Available: ${RPC_TOOLS.join(', ')}.` };
+    const denied = await permit(tool, m.args ?? {}, ctx);
+    if (denied) return { error: denied };
+    try {
+      return { output: await tool.run(m.args ?? {}, ctx) };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : String(e) };
+    }
+  };
+}
+
 function runBash(command: string, ctx: ToolContext, timeoutMs: number): Promise<string> {
+  return runProcess('bash', ['-c', command], ctx, timeoutMs);
+}
+
+function runProcess(file: string, args: string[], ctx: ToolContext, timeoutMs: number, rpc?: (m: RpcRequest) => Promise<RpcReply>): Promise<string> {
   return new Promise((resolve) => {
-    const child = spawn('bash', ['-c', command], { cwd: ctx.root, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(file, args, { cwd: ctx.root, detached: true, stdio: rpc ? ['ignore', 'pipe', 'pipe', 'ipc'] : ['ignore', 'pipe', 'pipe'] });
+    if (rpc) child.on('message', (m: RpcRequest) => void rpc(m).then((reply) => child.connected && child.send({ id: m.id, ...reply })));
     let out = '';
     let stopped: string | null = null;
     const killGroup = (reason: string) => {
@@ -246,8 +275,8 @@ function runBash(command: string, ctx: ToolContext, timeoutMs: number): Promise<
     };
     const onAbort = () => killGroup('interrupted by the user');
     ctx.signal.addEventListener('abort', onAbort, { once: true });
-    child.stdout.on('data', (d: Buffer) => (out += d.toString()));
-    child.stderr.on('data', (d: Buffer) => (out += d.toString()));
+    child.stdout!.on('data', (d: Buffer) => (out += d.toString()));
+    child.stderr!.on('data', (d: Buffer) => (out += d.toString()));
     const timer = setTimeout(() => killGroup(`killed after ${timeoutMs / 1000}s timeout (whole process group)`), timeoutMs);
     const done = (status: string) => {
       clearTimeout(timer);
@@ -635,9 +664,8 @@ export const allTools: Tool[] = [
   {
     name: 'run_code',
     readOnly: false,
-    group: 'scripts',
     description:
-      'Execute a short Python or Node.js (ES module) script with the workspace root as working directory, so relative paths and imports like ./src/x.js resolve against the project. Returns its output. Use it for calculations, data analysis, parsing files or quick experiments.',
+      'Execute a short Python or Node.js (ES module) script with the workspace root as working directory, so relative paths and imports like ./src/x.js resolve against the project. Only what the script prints comes back to you. In Node, `await tools.read_file({path, offset, limit})`, `tools.grep({pattern, path, include})`, `tools.glob({pattern})`, `tools.list_dir({path})` and `tools.bash({command})` return the same text as those tools (up to 50 calls per script): chain several reads, searches or checks in one script and print only what you need, instead of one tool call per step.',
     schema: {
       type: 'object',
       properties: {
@@ -650,7 +678,8 @@ export const allTools: Tool[] = [
     run(i, ctx) {
       const quoted = `'${str(i, 'code').replace(/'/g, `'\\''`)}'`;
       const seconds = Math.min(600, Math.max(1, num(i, 'timeout_seconds', 60)));
-      return runBash(`${str(i, 'language') === 'python' ? 'python3 -c' : 'node --input-type=module -e'} ${quoted}`, ctx, seconds * 1000);
+      if (str(i, 'language') === 'python') return runBash(`python3 -c ${quoted}`, ctx, seconds * 1000);
+      return runProcess('node', ['--input-type=module', '-e', RPC_PRELUDE + str(i, 'code')], ctx, seconds * 1000, rpcHandler(ctx));
     },
   },
   {

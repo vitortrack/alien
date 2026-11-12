@@ -87,3 +87,30 @@ test('images go to the model only when it has vision; the history keeps them for
   assert.equal(sent.at(-1)![1]!.images, undefined);
   assert.deepEqual((blind.snapshot() as { history: { images?: string[] }[] }).history[0]!.images, ['aGVsbG8=']);
 });
+
+test('prune: identical tool outputs keep only the newest copy; old big tool-call arguments shrink in blocks', async () => {
+  const sent: { role: string; content: string; tool_calls?: { function: { arguments: Record<string, string> } }[] }[][] = [];
+  globalThis.fetch = (async (url: string, init: { body: string }) => {
+    if (url.endsWith('/api/show')) return new Response(JSON.stringify({ model_info: { 'm.context_length': 100000 }, remote_host: 'cloud' }));
+    sent.push((JSON.parse(init.body) as { messages: (typeof sent)[number] }).messages);
+    const chunk = { message: { tool_calls: [{ function: { name: 'write_file', arguments: { path: 'a.ts', content: 'c'.repeat(5000) } } }] }, done: true, prompt_eval_count: 10, eval_count: 1 };
+    return new Response(`${JSON.stringify(chunk)}\n`);
+  }) as typeof fetch;
+  const provider = new OllamaProvider('glm:cloud', 1000);
+  const req: StepRequest = { system: 's', tools: [{ name: 'write_file', description: 'd', schema: { type: 'object', properties: {}, required: [] } }], signal: new AbortController().signal, onText: () => {}, onThinking: () => {} };
+  provider.addUser('task');
+  const same = `same output ${'z'.repeat(300)}`;
+  for (let i = 0; i < 21; i++) {
+    const r = await provider.step(req);
+    provider.addToolResults(r.toolCalls.map((c) => ({ id: c.id, name: c.name, output: i === 3 || i === 20 ? same : `out ${i}`, isError: false })));
+  }
+  await provider.step(req);
+  const last = sent.at(-1)!;
+  const tools = last.filter((m) => m.role === 'tool');
+  assert.match(tools[3]!.content, /^\[identical to a later output of this tool/);
+  assert.equal(tools[20]!.content, same);
+  const args = last.filter((m) => m.tool_calls).map((m) => m.tool_calls![0]!.function.arguments.content!);
+  assert.equal(args.filter((a) => a.includes('characters elided')).length, 10);
+  assert.ok(args.slice(0, 10).every((a) => a.length < 400) && args.slice(10).every((a) => a.length === 5000));
+  assert.equal(last.filter((m) => m.tool_calls)[0]!.tool_calls![0]!.function.arguments.path, 'a.ts');
+});

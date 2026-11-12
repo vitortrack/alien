@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { formatErrors, typeDiagnostics, typeErrors } from './diagnostics.js';
 import { isReadOnlyCommand } from './shell.js';
+import { SKILL_REVIEW_AFTER_STEPS } from './skill-review.js';
 
 const researchOnly = (t: Tool): boolean => t.readOnly && !['delegate', 'update_plan', 'remember', 'report_conflict', 'skill'].includes(t.name);
 
@@ -68,6 +69,7 @@ export class Agent {
   private readonly touched = new Set<string>();
   private readonly instructionsSeen = new Set<string>();
   private verifiedSinceEdit = true;
+  private readonly trace: string[] = [];
 
   constructor(
     private readonly session: Session,
@@ -157,6 +159,7 @@ export class Agent {
     let lastScopeReport: string | null = null;
     const dirtyAtStart = new Set(this.role === 'main' ? await changedFiles(cfg.root) : []);
     this.touched.clear();
+    this.trace.length = 0;
 
     try {
       for (let step = 1; step <= cfg.maxSteps; step++) {
@@ -239,6 +242,7 @@ export class Agent {
           if (this.role === 'main' && this.changed) {
             await this.session.memory.add('episode', `Task: ${task.slice(0, 300)} | Outcome: ${r.text.slice(0, 700)}`, ctx.signal);
           }
+          if (this.role === 'main' && step >= SKILL_REVIEW_AFTER_STEPS) this.session.reviewSkills({ task, trace: [...this.trace], answer: r.text });
           return r.text;
         }
 
@@ -289,6 +293,7 @@ export class Agent {
 
   private async call(c: ToolCall, ctx: ToolContext): Promise<ToolResult> {
     const finish = (output: string, isError: boolean): ToolResult => {
+      this.trace.push(`${isError ? '✗' : '✓'} ${c.name} ${describeInput(c.input, 60)}`);
       this.ui.observation(!isError, output);
       this.session.log({ agent: this.role, event: 'tool', name: c.name, input: c.input, isError, output: output.slice(0, 4000) });
       return { id: c.id, name: c.name, output, isError };
