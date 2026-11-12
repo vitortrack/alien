@@ -24,7 +24,7 @@ Opções:
   -m, --model <nome>                 padrão: ${DEFAULT_MODEL.ollama} (ollama) · ${DEFAULT_MODEL.anthropic} (anthropic)
       --mode <ask|auto|read-only>    permissão para escrita e bash (padrão: ask)
   -C, --cwd <dir>                    pasta de trabalho (padrão: a atual)
-      --orchestrate                  contrato (Claude) → fatias com portão → revisão
+      --orchestrate                  contrato → fatias com portão → revisão
       --gate                         o próprio modelo escreve checagens de pronto (uma chamada, sem explorar o repo); o agente só conclui quando passam
       --gate-file <arquivo>          reaproveita as checagens salvas nesse arquivo (uma vez por card) ou grava as novas nele
       --harness <arquivo>            texto de harness específico da tarefa (RHI), posto antes do pedido

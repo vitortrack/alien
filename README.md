@@ -1,6 +1,6 @@
 # Alien
 
-Agente de código autônomo para o terminal. Lê, entende, altera e verifica código no seu projeto, com raciocínio ReAct (pensar → agir → observar), planejamento, autocorreção, portões determinísticos de verificação e de escopo, orquestração multiagente, RAG sobre o código e memória vetorial de longo prazo.
+Agente de código autônomo para o terminal e o VS Code. Lê, entende, altera e verifica código no seu projeto, com raciocínio ReAct (pensar → agir → observar), planejamento, autocorreção, portões determinísticos de verificação e de escopo, orquestração multiagente, RAG sobre o código e memória vetorial de longo prazo.
 
 Roda **100% local** com [Ollama](https://ollama.com) ou com **Claude** (API da Anthropic).
 
@@ -33,7 +33,7 @@ O Alien não depende do Claude Code: o modo multiagente (`--orchestrate`), as ch
 | Recurso | Precisa de | Sem ele |
 |---|---|---|
 | Busca semântica no código e memória de longo prazo | `ollama pull qwen3-embedding:0.6b` | a busca usa só palavras-chave (BM25) |
-| Ferramenta `run_code` | `python3` ou `node` no PATH, conforme a linguagem | a ferramenta falha só para a linguagem que faltar |
+| Ferramenta `run_code` | `node` (scripts com acesso às ferramentas) ou `python3` no PATH | a ferramenta falha só para a linguagem que faltar |
 | Reverter edições que deixam erro de tipo | TypeScript instalado no projeto aberto | a checagem não roda e a edição é aplicada |
 
 ## Instalação
@@ -57,6 +57,8 @@ Claude: exporte `ANTHROPIC_API_KEY` e o Alien passa a usar `claude-opus-5-5` (ou
 
 Chat do Alien na barra lateral (ícone do alienígena), com o mesmo núcleo do CLI.
 
+Instale pelo painel **Extensions** do VS Code: busque **Alien** e clique em *Install*. Ou gere o pacote a partir do código:
+
 ```bash
 cd vscode
 npm install
@@ -64,7 +66,7 @@ npm run package                                   # gera alien-0.1.0.vsix
 code --install-extension alien-0.1.0.vsix --force
 ```
 
-Configurações em *Settings → Alien*. Referências `arquivo:linha` abrem no editor; permissões aparecem como botões Permitir/Negar; a opção **multiagente** usa o pipeline planner → workers → revisor.
+Configurações em *Settings → Alien*. O modelo também pode ser trocado no seletor do chat, que lista os modelos instalados no Ollama. Referências `arquivo:linha` abrem no editor; permissões aparecem como botões Permitir/Negar; prints e arquivos podem ser anexados (📎, Ctrl+V ou arrastar): imagens vão para o modelo quando ele tem visão, PDFs viram texto com `pdftotext`. A opção **multiagente** usa o mesmo fluxo do `--orchestrate`.
 
 ## Uso
 
@@ -73,6 +75,7 @@ alien                                   # modo interativo na pasta atual
 alien "adicione paginação na listagem"  # executa e sai
 alien -C ../meu-projeto --mode auto "corrija o build"
 alien --orchestrate "crie o módulo de cupons com testes"
+alien --gate --gate-file card-746.json "implemente o card 746"
 alien -p anthropic --effort xhigh "investigue o vazamento de memória"
 ```
 
@@ -82,16 +85,21 @@ alien -p anthropic --effort xhigh "investigue o vazamento de memória"
 | `-m, --model <nome>` | modelo (`glm-5.3-flash:cloud`, `qwen3:8b`, `claude-opus-5-5`, …) |
 | `--mode ask\|auto\|read-only` | `ask` pede confirmação para escrita e `bash` (comandos só de leitura, como `ls`, `grep` e `find`, passam direto); `auto` só confirma comandos destrutivos; `read-only` bloqueia tudo que altera |
 | `-C, --cwd <dir>` | pasta de trabalho (o agente não acessa arquivos fora dela) |
-| `--orchestrate` | pipeline planner → workers → revisor |
+| `--orchestrate` | contrato (fatias de 1–3 arquivos, cada critério com uma checagem em bash, validada contra o código atual) → cada fatia em contexto limpo, com portão de até 3 tentativas → uma revisão final |
+| `--gate` | o modelo escreve as checagens de pronto numa chamada; o agente só conclui quando todas passam, mais um critério fixo de diff mínimo julgado pelo modelo |
+| `--gate-file <arquivo>` | reaproveita as checagens salvas nesse arquivo ou grava as novas nele |
+| `--harness <arquivo>` | texto de harness específico da tarefa (RHI), posto antes do pedido |
+| `--handoff <arquivo>` | lê a nota da execução anterior no início e grava a nota desta no fim |
+| `--attempts <n>` | melhor de N: tentativas isoladas, fica a que passa nos testes com o menor diff |
 | `--review` | liga a revisão por um agente crítico (padrão: desligada; medido: mesmo acerto e 19–38% menos tokens sem ela, com a checagem de escopo e o portão de verificação sempre ativos) |
-| `--max-steps <n>` | limite de passos por agente (padrão 50) |
+| `--max-steps <n>` | limite de passos por agente (padrão 80) |
 | `--budget <tokens>` | para quando o consumo total passar do limite |
 | `--effort <nível>` | esforço de raciocínio do Claude (`low` … `max`) |
 | `--num-ctx <n>` | janela de contexto do Ollama (padrão 65536) |
 | `--embed-model <nome>` | modelo de embedding (padrão `qwen3-embedding:0.6b`) |
 | `--lang <idioma>` | idioma de tudo o que o agente escreve: `pt-BR` (padrão), `en`, `es`, `fr`, `de`, `it` ou `auto` (o da pergunta) |
 | `--thinking` | mostra o raciocínio do modelo (por padrão aparece só "✻ pensando…") |
-| `--no-log` | não grava o trace da sessão |
+| `--no-log` | não grava o trace da sessão em `~/.alien/sessions` |
 | `-c`, `--continue` | retoma a última conversa deste projeto |
 | `-r`, `--resume <id>` | retoma uma conversa salva |
 | `--fork` | com `-c` ou `-r`: continua numa cópia, sem alterar a original |
@@ -139,12 +147,14 @@ A saída é Markdown renderizado no terminal (títulos, listas, negrito, blocos 
 | Componente | Como está implementado | Onde |
 |---|---|---|
 | **1. Núcleo cognitivo** | Persona de engenheiro sênior, método de resolução (evidência → causa raiz → decisão → verificação → reflexão → aprendizado), guardrails (escopo, segredos, ações destrutivas) e um prompt por papel (main, worker, explorer, planner, critic). Instruções do projeto em `ALIEN.md`, `AGENTS.md` ou `CLAUDE.md` são carregadas automaticamente. | `src/prompts.ts` |
-| **2. Memória** | **Curto prazo:** histórico da sessão, com compactação automática (resumo) quando a janela do modelo enche. **Longo prazo:** banco vetorial em `.alien/memory.jsonl` com *fatos*, *lições* e *episódios*; as lembranças relevantes são recuperadas no início de cada tarefa, os episódios são gravados automaticamente ao concluir e o agente consulta a memória com `recall`. | `src/memory.ts`, `src/providers/ollama.ts` |
+| **2. Memória** | **Curto prazo:** histórico da sessão, com compactação automática (resumo com o pedido original fixo) quando a janela do modelo enche; saídas antigas de ferramenta são mascaradas em blocos de 10, saídas idênticas ficam só na cópia mais nova e argumentos grandes de chamadas antigas (o conteúdo de um `write_file`, por exemplo) são encurtados. **Longo prazo:** banco vetorial em `~/.alien/projects/<projeto>/memory.jsonl` com *fatos*, *lições* e *episódios*; as lembranças relevantes são recuperadas no início de cada tarefa, os episódios são gravados automaticamente ao concluir e o agente consulta a memória com `recall`. | `src/memory.ts`, `src/providers/ollama.ts` |
 | **3. Planejamento** | Laço ReAct; planner dedicado no modo `--orchestrate`; autocorreção (o erro volta como observação estruturada, e após 3 falhas seguidas o agente é instruído a mudar de estratégia); antes de concluir, **portão de verificação** (se mexeu em código e não rodou nada depois da última edição, pede uma vez para rodar testes/build) e **checagem de escopo** (áreas do diff que o pedido não menciona); revisor independente opcional (`--review`). | `src/agent.ts`, `src/orchestrator.ts` |
-| **4. Ferramentas** | Agente principal: `bash`, `read_file`, `write_file`, `edit_file`, `semantic_search` (RAG), `web_fetch`, `delegate`, `recall`, `skill` (só quando há skills), `report_conflict` (encerra a tarefa relatando que um teste ou o código contradiz o pedido, em vez de contornar; só aceito depois de editar e rodar algo). Entradas validadas contra o schema; caminhos presos ao workspace (inclusive via symlink); permissões por modo; detecção de comandos destrutivos. Listar, buscar e rodar código ficam com o `bash`: na avaliação, as ferramentas dedicadas (`list_dir`, `glob`, `grep`, `run_code`, `update_plan`, `remember`) custavam ~40% mais passos e tokens sem ganho de acerto; os subagentes de pesquisa, que não têm `bash`, continuam com `list_dir`, `glob` e `grep`. | `src/tools.ts`, `src/validate.ts` |
+| **4. Ferramentas** | Com Ollama: `bash`, `read_file`, `write_file`, `edit_file`, `list_dir`, `glob`, `grep`, `run_code`, `update_plan`, `semantic_search` (RAG), `delegate`, `recall`, `status`, `skill` (só quando há skills) e `report_conflict` (encerra a tarefa relatando que um teste ou o código contradiz o pedido, em vez de contornar; só aceito depois de editar e rodar algo). `web_fetch` e `remember` entram com `load_tools` ou com uma skill que os cite. Um script Node no `run_code` chama `tools.read_file`, `tools.grep`, `tools.glob`, `tools.list_dir` e `tools.bash` (até 50 por script, com as mesmas permissões) e só o que ele imprime volta ao modelo: várias leituras e buscas viram um passo só. Com Claude, o agente principal fica só com `bash` no lugar de `list_dir`, `glob`, `grep`, `run_code`, `update_plan` e `remember` (na avaliação, as ferramentas dedicadas custavam ~40% mais passos e tokens sem ganho de acerto). Saída maior que 20 mil caracteres vai para `.alien/outputs/` e o modelo recebe o início (40%), o fim (60%) e o caminho. Entradas validadas contra o schema; caminhos presos ao workspace (inclusive via symlink); permissões por modo; detecção de comandos destrutivos; leitura de `.env` e do ambiente de containers sempre pede confirmação. | `src/tools.ts`, `src/validate.ts` |
 | **5. Observabilidade** | Trace de cada passo (texto do modelo, chamadas, resultados, tokens e custo) em `~/.alien/sessions/*.jsonl`; contagem de tokens e custo estimado ao fim de cada tarefa; travas contra loop (limite de passos, chamada idêntica repetida, orçamento de tokens) e Ctrl+C para interromper. | `src/session.ts`, `src/agent.ts` |
 
-**Multiagente.** O agente principal age como gerente: delega pesquisa ampla a *explorers* (somente leitura, rodam em paralelo) e subtarefas independentes a *workers*, e cada sub-agente começa com contexto limpo. No `--orchestrate`, o pipeline é fixo: planner → um worker por passo → revisor → correções.
+**Multiagente.** O agente principal age como gerente: delega pesquisa ampla a *explorers* (somente leitura, rodam em paralelo) e subtarefas independentes a *workers*, e cada sub-agente começa com contexto limpo. No `--orchestrate`, o fluxo é contrato → fatias com portão → revisão (veja a tabela de opções).
+
+**Motor de decisão.** Contratos, checagens de pronto, o critério de diff mínimo e o RHI (`src/rhi.ts`: `refine`, `compare` e `digest` do texto de harness) usam um juiz do próprio Alien, com o mesmo modelo do agente, que devolve JSON validado contra um schema.
 
 **RAG.** `semantic_search` indexa o código em trechos de 60 linhas (com sobreposição) e ranqueia combinando similaridade de embeddings (peso 0,8) e BM25 (0,2). O agente escreve a busca como pergunta + identificadores prováveis em inglês, o que funciona como expansão de query. O índice é incremental e fica em `~/.alien/projects/`, fora do repositório. Sem modelo de embedding, cai para BM25 puro.
 
@@ -152,7 +162,9 @@ A saída é Markdown renderizado no terminal (títulos, listas, negrito, blocos 
 
 ## Skills
 
-O Alien lê skills no formato do Claude Code (`SKILL.md` com `name` e `description` no frontmatter) em `.claude/skills/` e `.agents/skills/` do projeto e em `~/.claude/skills/`; com o mesmo nome, vale a do projeto. O prompt lista só nome e descrição; o agente carrega o texto completo (e os arquivos de apoio da pasta) com a ferramenta `skill` quando a tarefa combina. Sem skills, nada muda no prompt nem nas ferramentas. Na avaliação, com uma regra de projeto que só existe numa skill, o acerto foi de 12/20 para 19/20 e o agente carregou a skill nas 20 execuções.
+O Alien lê skills no formato do Claude Code (`SKILL.md` com `name` e `description` no frontmatter) em `.claude/skills/` e `.agents/skills/` do projeto, em `~/.claude/skills/` e em `~/.alien/skills/`; com o mesmo nome, vale a do projeto. O prompt lista só nome e descrição; o agente carrega o texto completo (e os arquivos de apoio da pasta) com a ferramenta `skill` quando a tarefa combina, e uma skill com `allowed-tools` libera as ferramentas que cita. Sem skills, nada muda no prompt nem nas ferramentas. Na avaliação, com uma regra de projeto que só existe numa skill, o acerto foi de 12/20 para 19/20 e o agente carregou a skill nas 20 execuções.
+
+**Revisão automática.** Depois de uma tarefa com 10 passos ou mais, uma chamada separada relê a conversa (pedidos anteriores, chamadas de ferramenta, resposta final) e decide se cria ou atualiza uma skill de classe de tarefa em `~/.alien/skills/` — por exemplo quando o usuário corrigiu o jeito de trabalhar ou surgiu uma técnica reaproveitável. Ela só escreve ali: as skills do projeto e as de `~/.claude/skills/` são só leitura. `ALIEN_USER_SKILLS=off` desliga a revisão e as skills de usuário (a avaliação usa assim).
 
 ## Edição de arquivos
 
@@ -164,7 +176,9 @@ O Alien lê skills no formato do Claude Code (`SKILL.md` com `name` e `descripti
 - **Erro que ensina:** trecho ambíguo lista as linhas de cada ocorrência; trecho não encontrado mostra as linhas mais parecidas ("Did you mean…").
 - **Trava de sintaxe** (como SWE-agent): edição que quebraria JS/TS/TSX/JSON/Python válido é recusada, com a linha do erro.
 - **Retorno com evidência:** cada edição devolve o trecho editado numerado para conferência.
-- Arquivos grandes são paginados com cabeçalho e indicação de continuação; observações antigas são resumidas no histórico para poupar contexto; o timeout do `bash` mata o grupo de processos inteiro.
+- **Trava de tipos:** em `.ts`/`.tsx`, edição que cria erro que o TypeScript do próprio projeto enxerga no arquivo (import faltando, nome não declarado) é revertida, com os erros na resposta.
+- **Regras de subpasta:** ler ou editar um arquivo traz o `CLAUDE.md`/`AGENTS.md` das pastas dele, inclusive quando a leitura é feita por `tools.read_file` dentro do `run_code`.
+- Arquivos grandes são paginados; acima de 300 linhas, a primeira leitura traz um sumário das declarações. O timeout do `bash` mata o grupo de processos inteiro.
 
 ## Avaliação
 
@@ -194,6 +208,13 @@ src/
   orchestrator.ts   pipeline planner → workers → revisor
   prompts.ts        núcleo cognitivo por papel
   tools.ts          ferramentas e permissões
+  gate.ts           checagens de pronto e critério de diff mínimo
+  contract.ts       contrato por fatias do --orchestrate
+  judge.ts          motor de decisão (JSON validado)
+  rhi.ts            reescrita e comparação de harness
+  attempts.ts       melhor de N (--attempts)
+  skills.ts         descoberta e leitura de skills
+  skill-review.ts   revisão automática de skills
   rag.ts            embeddings, BM25, índice do código
   memory.ts         memória vetorial de longo prazo
   providers/        ollama.ts · anthropic.ts
@@ -204,4 +225,4 @@ src/
 
 - As ferramentas de arquivo não saem do workspace. O `bash` roda com as permissões do seu usuário: use `--mode ask` (padrão) em projetos importantes e `--mode auto` só onde confia no resultado.
 - Comandos destrutivos (`rm -rf /`, `sudo`, `git push --force`, `git reset --hard`, `curl | sh`, …) sempre pedem confirmação, mesmo em `auto`.
-- `.alien/` guarda o índice e a memória do projeto. Ela já está no `.gitignore` deste repositório; adicione-a também nos projetos em que usar o agente.
+- Índice, memória, sessões e skills ficam em `~/.alien/`, fora do projeto. Dentro do projeto, `.alien/` guarda só saídas longas e anexos e já cria o próprio `.gitignore`.
