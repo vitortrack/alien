@@ -3,3 +3,4 @@ tsconfig.json
 build.mjs
 .gitignore
 **/*.map
+media/guide/**
