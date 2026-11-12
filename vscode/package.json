@@ -1,6 +1,6 @@
 {
   "name": "alien",
-  "displayName": "Alien",
+  "displayName": "Alien — Agente de Código",
   "description": "Agente de código autônomo em formato de chat: ReAct, planejamento, revisão independente, multiagente, RAG e memória — local com Ollama ou com Claude.",
   "version": "0.1.0",
   "publisher": "alien-local",
