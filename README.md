@@ -24,7 +24,7 @@ O mesmo núcleo roda no CLI e na extensão do VS Code, então os requisitos são
 - **Um modelo**, de uma destas formas:
   - **Ollama** instalado e rodando em `http://localhost:11434`. Para outro endereço, use `OLLAMA_HOST` no CLI ou *Settings → Alien → Ollama Host* na extensão. O modelo padrão, `glm-5.3-flash:cloud`, roda na nuvem do Ollama: é preciso entrar na conta com `ollama signin`. Modelos locais (`-m qwen3:8b`, por exemplo) não precisam de conta, só de `ollama pull`.
   - **Ou Claude**, com `ANTHROPIC_API_KEY` no ambiente. Na extensão, a variável precisa existir no ambiente em que o VS Code foi aberto.
-- **`bash`, `git`, `grep` e `find` no PATH.** Linux e macOS já trazem. No Windows, use WSL ou Git Bash: a ferramenta de terminal do agente chama `bash` diretamente.
+- **Linux ou macOS, com `bash`, `git`, `grep` e `find` no PATH** (os dois já trazem). No **Windows**, o Alien roda dentro do WSL: veja [Windows (WSL)](#windows-wsl).
 
 O Alien não depende do Claude Code: o modo multiagente (`--orchestrate`), as checagens de pronto (`--gate`) e a reescrita de harness (`src/rhi.ts`) usam o mesmo modelo configurado para o agente, por meio de um agente do próprio Alien só de leitura, que devolve as decisões em JSON validado.
 
@@ -67,6 +67,21 @@ code --install-extension alien-0.1.0.vsix --force
 ```
 
 Configurações em *Settings → Alien*. O modelo também pode ser trocado no seletor do chat, que lista os modelos instalados no Ollama. Referências `arquivo:linha` abrem no editor; permissões aparecem como botões Permitir/Negar; prints e arquivos podem ser anexados (📎, Ctrl+V ou arrastar): imagens vão para o modelo quando ele tem visão, PDFs viram texto com `pdftotext`. A opção **multiagente** usa o mesmo fluxo do `--orchestrate`.
+
+## Windows (WSL)
+
+O Alien chama `bash`, `grep` e `find` diretamente, então no Windows ele roda dentro do **WSL** (o Linux integrado ao Windows). O Windows sem WSL não é suportado: a extensão publicada é para Linux x64 e o painel *Extensions* não a instala fora do WSL.
+
+1. **Instale o WSL com Ubuntu.** No PowerShell como administrador, rode `wsl --install` e reinicie. Guia oficial: [Instalar o WSL](https://learn.microsoft.com/pt-br/windows/wsl/install).
+2. **Instale a extensão WSL no VS Code** e abra o projeto pelo WSL: *F1 → WSL: Connect to WSL*, depois *File → Open Folder* numa pasta do Linux (por exemplo `~/projetos/meu-app`). Guia oficial: [Desenvolver no WSL com o VS Code](https://code.visualstudio.com/docs/remote/wsl).
+   Prefira pastas do Linux a `/mnt/c/...`: no disco do Windows, `git`, buscas e testes ficam bem mais lentos.
+3. **Instale o Alien já conectado ao WSL:** no painel *Extensions*, busque **Alien — Agente de Código** e clique em *Install in WSL*.
+4. **Escolha o modelo**, de uma destas formas:
+   - **Ollama dentro do WSL (mais simples):** no terminal do Ubuntu, `curl -fsSL https://ollama.com/install.sh | sh`, depois `ollama signin` (para o modelo padrão, que roda na nuvem) e `ollama pull qwen3-embedding:0.6b`. Guia: [Ollama no Linux](https://docs.ollama.com/linux).
+   - **Ollama no Windows:** instale pelo [instalador do Windows](https://ollama.com/download/windows) e ligue a rede espelhada do WSL, para o `localhost` do WSL chegar no Windows: crie `%UserProfile%\.wslconfig` com `[wsl2]` e `networkingMode=mirrored` numa linha abaixo, depois rode `wsl --shutdown`. Guia: [Rede espelhada do WSL](https://learn.microsoft.com/pt-br/windows/wsl/networking#mirrored-mode-networking). Sem isso, ajuste *Settings → Alien → Ollama Host* para o IP do Windows.
+   - **Claude:** exporte `ANTHROPIC_API_KEY` no `~/.bashrc` do Ubuntu e reabra a janela do VS Code conectada ao WSL.
+
+O CLI segue o mesmo caminho: instale o Node.js 22+ dentro do Ubuntu (por exemplo com [nvm](https://github.com/nvm-sh/nvm)) e siga a [Instalação](#instalação) no terminal do WSL.
 
 ## Uso
 
