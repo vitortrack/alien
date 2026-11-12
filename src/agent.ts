@@ -144,6 +144,10 @@ export class Agent {
   private async loop(task: string, images: Image[] = []): Promise<string> {
     const { cfg } = this.session;
     const ctx = this.session.context(this.ui, this.files, task);
+    ctx.afterRpc = async (name, input) => {
+      if (name === 'bash' && !isReadOnlyCommand(String(input.command ?? ''))) this.verifiedSinceEdit = true;
+      return name === 'read_file' && typeof input.path === 'string' ? nestedInstructions(ctx.root, cleanPath(input.path), this.instructionsSeen) : '';
+    };
     this.changed = false;
     this.callCounts.clear();
     this.verifiedSinceEdit = true;
@@ -355,7 +359,7 @@ export class Agent {
           const diagnostics = typeDiagnostics(ctx.root, file);
           if (diagnostics) output += `\n\n${diagnostics}`;
         }
-      } else if (c.name === 'run_code' || (c.name === 'bash' && !isReadOnlyCommand(String(c.input.command ?? '')))) {
+      } else if (c.name === 'bash' && !isReadOnlyCommand(String(c.input.command ?? ''))) {
         this.verifiedSinceEdit = true;
       }
       if (!tool.readOnly) {

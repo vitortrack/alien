@@ -38,6 +38,7 @@ export interface ToolContext {
   confirm(question: string, alwaysLabel?: string): Promise<Decision>;
   setPlan(plan: PlanItem[]): void;
   delegate(role: DelegateRole, task: string): Promise<string>;
+  afterRpc?(name: string, input: Input): Promise<string>;
 }
 
 export interface Tool extends ToolSpec {
@@ -248,7 +249,9 @@ function rpcHandler(ctx: ToolContext): (m: RpcRequest) => Promise<RpcReply> {
     const denied = await permit(tool, m.args ?? {}, ctx);
     if (denied) return { error: denied };
     try {
-      return { output: await tool.run(m.args ?? {}, ctx) };
+      const output = await tool.run(m.args ?? {}, ctx);
+      const extra = (await ctx.afterRpc?.(m.name, m.args ?? {})) ?? '';
+      return { output: extra ? `${output}\n\n${extra}` : output };
     } catch (e) {
       return { error: e instanceof Error ? e.message : String(e) };
     }

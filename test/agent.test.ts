@@ -457,6 +457,35 @@ test('verification gate asks once to run something after unverified code edits',
   }
 });
 
+test('run_code follows the harness: reads bring nested instructions; only a real command counts as verification', async () => {
+  const root = workspace();
+  fs.mkdirSync(path.join(root, 'db'));
+  fs.writeFileSync(path.join(root, 'db/CLAUDE.md'), 'Migrations are applied by hand.');
+  fs.writeFileSync(path.join(root, 'db/init.sql'), 'select 1;\n');
+  const ui = UI.create();
+  try {
+    const readOnly = new ScriptedProvider([
+      () => call('write_file', { path: 'src/a.js', content: 'export const a = 1;\n' }),
+      () => call('run_code', { language: 'node', code: "console.log(await tools.read_file({ path: 'db/init.sql' }))" }),
+      () => answer('pronto'),
+      ({ user }) => (assert.match(user.at(-1)!, /^\[verification\]/), answer('pronto')),
+      () => answer('pronto'),
+    ]);
+    await new Session(config(root, { mode: 'auto' }), ui, () => readOnly).run('crie a');
+    assert.match(readOnly.results[1]![0]!.output, /select 1;[\s\S]*\[instructions from db\/CLAUDE\.md — they apply to files under db\/\]\nMigrations are applied by hand\./);
+
+    const ran = new ScriptedProvider([
+      () => call('edit_file', { path: 'src/a.js', old_string: '1', new_string: '2' }),
+      () => call('run_code', { language: 'node', code: "console.log(await tools.bash({ command: 'node src/a.js' }))" }),
+      ({ user }) => (assert.doesNotMatch(user.at(-1) ?? '', /^\[verification\]/), answer('feito e testado')),
+      ({ user }) => (assert.doesNotMatch(user.at(-1)!, /^\[verification\]/), answer('feito e testado')),
+    ]);
+    assert.equal(await new Session(config(root, { mode: 'auto' }), ui, () => ran).run('mude a'), 'feito e testado');
+  } finally {
+    ui.close();
+  }
+});
+
 test('report_conflict ends the task with the explanation, but only after an edit and a run since it', async () => {
   const root = workspace();
   const ui = UI.create();
