@@ -960,3 +960,43 @@ test('maxSteps 0 means no step limit: the agent runs until it answers', async ()
   ui.close();
   assert.equal(out, 'done');
 });
+
+test('a read announced while the model streams starts right away and runs only once', async () => {
+  const root = workspace();
+  fs.writeFileSync(path.join(root, 'a.txt'), 'hello');
+  const ui = UI.create();
+  let resultsWhenStepEnded = -1;
+  const results: ToolResult[][] = [];
+  const read = { id: 'r1', name: 'read_file', input: { path: 'a.txt' } };
+  let turn = 0;
+  const provider: Provider = {
+    addUser() {},
+    addToolResults(r) {
+      results.push(r);
+    },
+    snapshot: () => null,
+    restore() {},
+    async step(req) {
+      if (turn++ > 0) return answer('ok');
+      req.onToolCall?.(read);
+      await new Promise((r) => setTimeout(r, 50));
+      resultsWhenStepEnded = results.length;
+      return { text: '', toolCalls: [read], stop: 'tool_use', usage };
+    },
+  };
+  const session = new Session(config(root), ui, () => provider);
+  const reads: unknown[] = [];
+  const original = session.log.bind(session);
+  session.log = (e: Record<string, unknown>) => {
+    if (e.event === 'tool' && e.name === 'read_file') reads.push(e);
+    original(e);
+  };
+  try {
+    await session.run('read a.txt');
+  } finally {
+    ui.close();
+  }
+  assert.equal(resultsWhenStepEnded, 0);
+  assert.equal(reads.length, 1, 'the early read must not run again');
+  assert.match(results[0]![0]!.output, /hello/);
+});

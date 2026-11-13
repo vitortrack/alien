@@ -127,6 +127,8 @@ export class OllamaProvider implements Provider {
     let text = '';
     let thinking = '';
     let toolCalls: OllamaToolCall[] = [];
+    let calls: ToolCall[] = [];
+    const toCall = (c: OllamaToolCall): ToolCall => ({ id: randomUUID(), name: c.function.name, input: parseArgs(c.function.arguments) });
     let usage: Usage = { input: 0, output: 0 };
     let doneReason = '';
     for await (const chunk of this.chunks(res)) {
@@ -140,7 +142,12 @@ export class OllamaProvider implements Provider {
         text += m.content;
         req.onText(m.content);
       }
-      if (m?.tool_calls?.length) toolCalls = toolCalls.concat(m.tool_calls);
+      for (const c of m?.tool_calls ?? []) {
+        toolCalls.push(c);
+        const call = toCall(c);
+        calls.push(call);
+        req.onToolCall?.(call);
+      }
       if (chunk.done) {
         usage = { input: chunk.prompt_eval_count ?? 0, output: chunk.eval_count ?? 0 };
         doneReason = chunk.done_reason ?? '';
@@ -148,14 +155,12 @@ export class OllamaProvider implements Provider {
     }
     this.lastPromptTokens = usage.input;
 
-    if (!toolCalls.length) toolCalls = parseInlineToolCalls(text, new Set(req.tools.map((t) => t.name)));
+    if (!toolCalls.length) {
+      toolCalls = parseInlineToolCalls(text, new Set(req.tools.map((t) => t.name)));
+      calls = toolCalls.map(toCall);
+    }
     this.history.push({ role: 'assistant', content: text, ...(thinking ? { thinking } : {}), ...(toolCalls.length ? { tool_calls: toolCalls } : {}) });
 
-    const calls: ToolCall[] = toolCalls.map((c) => ({
-      id: randomUUID(),
-      name: c.function.name,
-      input: parseArgs(c.function.arguments),
-    }));
     const stop = calls.length ? 'tool_use' : doneReason === 'length' ? 'max_tokens' : 'end';
     return { text, toolCalls: calls, stop, usage, ...(compacted ? { compacted } : {}) };
   }

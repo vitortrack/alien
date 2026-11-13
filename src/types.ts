@@ -54,6 +54,7 @@ export interface StepRequest {
   signal: AbortSignal;
   onText(delta: string): void;
   onThinking(delta: string): void;
+  onToolCall?(call: ToolCall): void;
 }
 
 export interface Image {

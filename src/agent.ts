@@ -181,6 +181,7 @@ export class Agent {
             this.session.log({ agent: this.role, event: 'queued-message', message });
           }
         }
+        const early = new Map<ToolCall, Promise<ToolResult>>();
         if (this.session.overBudget()) return `Orçamento de ${cfg.tokenBudget.toLocaleString('pt-BR')} tokens atingido; parei para não gastar além do limite.`;
         const r = await this.provider.step({
           system: this.system,
@@ -190,6 +191,9 @@ export class Agent {
           signal: this.session.signal,
           onText: this.ui.text,
           onThinking: this.ui.thinking,
+          onToolCall: (c) => {
+            if (this.isRead(c)) early.set(c, this.call(c, ctx));
+          },
         });
         this.session.addUsage(r.usage);
         if (r.compacted) {
@@ -263,7 +267,7 @@ export class Agent {
           return r.text;
         }
 
-        const results = await this.execute(r.toolCalls, ctx);
+        const results = await this.execute(r.toolCalls, ctx, early);
         const conflict = results.find((x) => x.name === 'report_conflict' && !x.isError);
         if (conflict) {
           this.session.log({ agent: this.role, event: 'conflict', text: conflict.output });
@@ -298,11 +302,14 @@ export class Agent {
     return `<recalled_memory>\nPossibly relevant notes from earlier sessions (verify before relying on them):\n${block}\n</recalled_memory>\n\n${body}`;
   }
 
-  private async execute(calls: ToolCall[], ctx: ToolContext): Promise<ToolResult[]> {
-    const isRead = (c: ToolCall) => Boolean(this.tools.find((t) => t.name === c.name)?.readOnly) && !(c.name === 'delegate' && c.input.role === 'worker');
+  private isRead(c: ToolCall): boolean {
+    return Boolean(this.tools.find((t) => t.name === c.name)?.readOnly) && !(c.name === 'delegate' && c.input.role === 'worker');
+  }
+
+  private async execute(calls: ToolCall[], ctx: ToolContext, early = new Map<ToolCall, Promise<ToolResult>>()): Promise<ToolResult[]> {
     const done = new Map<ToolCall, ToolResult>();
-    const reads = calls.filter(isRead);
-    (await Promise.all(reads.map((c) => this.call(c, ctx)))).forEach((r, i) => done.set(reads[i]!, r));
+    const reads = calls.filter((c) => this.isRead(c));
+    (await Promise.all(reads.map((c) => early.get(c) ?? this.call(c, ctx)))).forEach((r, i) => done.set(reads[i]!, r));
     for (const c of calls) if (!done.has(c)) done.set(c, await this.call(c, ctx));
     return calls.map((c) => done.get(c)!);
   }

@@ -176,3 +176,18 @@ test('the checkpoint lists the files read most recently before the cut', async (
   assert.equal(listed?.length, 5);
   assert.equal(new Set(listed).size, 5);
 });
+
+test('each streamed tool call is announced as it arrives, with the same id the step returns', async () => {
+  globalThis.fetch = (async (url: string) => {
+    if (url.endsWith('/api/show')) return new Response(JSON.stringify({ model_info: { 'm.context_length': 1000 } }));
+    const first = { message: { tool_calls: [{ function: { name: 'read_file', arguments: { path: 'a.ts' } } }] } };
+    const second = { message: { tool_calls: [{ function: { name: 'read_file', arguments: { path: 'b.ts' } } }] }, done: true, prompt_eval_count: 1, eval_count: 1 };
+    return new Response(`${JSON.stringify(first)}\n${JSON.stringify(second)}\n`);
+  }) as typeof fetch;
+  const announced: { id: string; input: Record<string, unknown> }[] = [];
+  const provider = new OllamaProvider('glm:cloud', 1000);
+  provider.addUser('task');
+  const r = await provider.step({ system: 's', tools: [{ name: 'read_file', description: 'd', schema: { type: 'object', properties: {}, required: [] } }], signal: new AbortController().signal, onText: () => {}, onThinking: () => {}, onToolCall: (c) => announced.push(c) });
+  assert.deepEqual(announced.map((c) => c.input.path), ['a.ts', 'b.ts']);
+  assert.deepEqual(r.toolCalls.map((c) => c.id), announced.map((c) => c.id));
+});
