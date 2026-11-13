@@ -1,4 +1,4 @@
-import { query, type HookCallback, type Options, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import { query, type HookCallback, type Options, type SandboxSettings, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentUI } from './agent-ui.js';
 import { languageName } from './prompts.js';
 import { isReadOnlyCommand, programOf } from './shell.js';
@@ -42,6 +42,17 @@ export function sdkEnv(provider: SdkRun['provider'], model: string, env: NodeJS.
     ANTHROPIC_DEFAULT_HAIKU_MODEL: model,
     CLAUDE_CODE_SUBAGENT_MODEL: model,
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+  };
+}
+
+export function sandboxSettings(root: string, env: NodeJS.ProcessEnv = process.env): SandboxSettings | undefined {
+  if (env.ALIEN_SANDBOX !== 'on') return undefined;
+  return {
+    enabled: true,
+    allowUnsandboxedCommands: false,
+    excludedCommands: ['docker *', 'psql *'],
+    network: { allowedDomains: ['registry.npmjs.org', '*.npmjs.org'] },
+    filesystem: { denyRead: [`${root}/**/.env`, `${root}/**/.env.local`, '~/.ssh', '~/.aws', '~/.config/anthropic'] },
   };
 }
 
@@ -118,6 +129,7 @@ export function show(message: SDKMessage, ui: AgentUI, state: ShowState): void {
 export async function runSdk(task: string, run: SdkRun, ui: AgentUI): Promise<SdkResult> {
   const controller = new AbortController();
   run.signal.addEventListener('abort', () => controller.abort(), { once: true });
+  const sandbox = sandboxSettings(run.root);
   const options: Options = {
     cwd: run.root,
     model: run.model,
@@ -128,6 +140,7 @@ export async function runSdk(task: string, run: SdkRun, ui: AgentUI): Promise<Sd
     permissionMode: 'default',
     hooks: { PreToolUse: [{ hooks: [permissionHook(run, ui)] }] },
     ...(run.maxSteps > 0 ? { maxTurns: run.maxSteps } : {}),
+    ...(sandbox ? { sandbox } : {}),
     ...(run.resume ? { resume: run.resume } : {}),
     ...(run.tools ? { tools: [...new Set(run.tools.map((t) => t.replace(/\(.*$/, '')))], allowedTools: run.tools } : {}),
     ...(run.outputSchema ? { outputFormat: { type: 'json_schema' as const, schema: run.outputSchema as Record<string, unknown> } } : {}),

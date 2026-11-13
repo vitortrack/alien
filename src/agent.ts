@@ -56,6 +56,7 @@ const readIfExists = (file: string): string | null => {
 const isDocFile = (f: string): boolean => /\.(md|mdx|txt|rst)$/i.test(f);
 
 const MAX_JUDGE_REJECTIONS = 2;
+const skippedEndSteps = (): Set<string> => new Set((process.env.ALIEN_SKIP_END ?? '').split(',').map((s) => s.trim()));
 
 export class Agent {
   private readonly provider: Provider;
@@ -159,6 +160,7 @@ export class Agent {
     this.provider.addUser(await this.withRecall(task, this.opening(task)), images);
     const gated = this.role === 'main' && Boolean(cfg.gate?.length);
     this.session.log({ agent: this.role, event: 'task', task });
+    const skip = skippedEndSteps();
     let reviews = 0;
     let scopeChecks = 0;
     let verifyNudges = 0;
@@ -212,14 +214,14 @@ export class Agent {
               continue;
             }
           }
-          if (this.role === 'main' && !this.verifiedSinceEdit && verifyNudges < 1 && [...this.touched].some((f) => !isDocFile(f))) {
+          if (this.role === 'main' && !skip.has('verify') && !this.verifiedSinceEdit && verifyNudges < 1 && [...this.touched].some((f) => !isDocFile(f))) {
             verifyNudges++;
             this.ui.info('verificação: pedindo para rodar testes ou build antes de concluir');
             this.session.log({ agent: this.role, event: 'verify-nudge' });
             this.provider.addUser(VERIFY_NUDGE);
             continue;
           }
-          if (this.changed && !requirementsChecked && [...this.touched].some((f) => !isDocFile(f))) {
+          if (this.changed && !skip.has('requirements') && !requirementsChecked && [...this.touched].some((f) => !isDocFile(f))) {
             requirementsChecked = true;
             this.ui.info('requisitos: conferindo cada item do pedido antes de concluir');
             this.session.log({ agent: this.role, event: 'requirements-check' });
@@ -228,7 +230,7 @@ export class Agent {
           }
           const diff = this.role === 'main' && this.changed ? await workspaceDiff(cfg.root) : null;
           const unchangedSinceApproval = diff !== null && diff === approvedDiff;
-          if (this.role === 'main' && cfg.review && this.changed && reviews < MAX_REVIEWS && !unchangedSinceApproval) {
+          if (this.role === 'main' && !skip.has('review') && cfg.review && this.changed && reviews < MAX_REVIEWS && !unchangedSinceApproval) {
             reviews++;
             const verdict = await this.session.review(task, this.ui);
             if (!verdict.approved) {
@@ -241,7 +243,7 @@ export class Agent {
             approvedDiff = diff;
             this.ui.info('revisor aprovou o trabalho');
           }
-          if (this.role === 'main' && this.changed && scopeChecks < MAX_SCOPE_CHECKS) {
+          if (this.role === 'main' && !skip.has('scope') && this.changed && scopeChecks < MAX_SCOPE_CHECKS) {
             scopeChecks++;
             const now = (await changedFiles(cfg.root)).filter((f) => !dirtyAtStart.has(f) || this.touched.has(f));
             const report = scopeReport(task, now);
@@ -254,7 +256,7 @@ export class Agent {
             }
           }
           this.session.log({ agent: this.role, event: 'final', text: r.text });
-          if (this.role === 'main' && this.changed) {
+          if (this.role === 'main' && this.changed && this.verifiedSinceEdit) {
             await this.session.memory.add('episode', `Task: ${task.slice(0, 300)} | Outcome: ${r.text.slice(0, 700)}`, ctx.signal);
           }
           if (this.role === 'main' && step >= SKILL_REVIEW_AFTER_STEPS) this.session.reviewSkills({ task, trace: [...this.trace], answer: r.text });
@@ -297,21 +299,21 @@ export class Agent {
   }
 
   private async execute(calls: ToolCall[], ctx: ToolContext): Promise<ToolResult[]> {
-    const parallel =
-      calls.length > 1 &&
-      calls.every((c) => this.tools.find((t) => t.name === c.name)?.readOnly && !(c.name === 'delegate' && c.input.role === 'worker'));
-    if (parallel) return Promise.all(calls.map((c) => this.call(c, ctx)));
-    const results: ToolResult[] = [];
-    for (const c of calls) results.push(await this.call(c, ctx));
-    return results;
+    const isRead = (c: ToolCall) => Boolean(this.tools.find((t) => t.name === c.name)?.readOnly) && !(c.name === 'delegate' && c.input.role === 'worker');
+    const done = new Map<ToolCall, ToolResult>();
+    const reads = calls.filter(isRead);
+    (await Promise.all(reads.map((c) => this.call(c, ctx)))).forEach((r, i) => done.set(reads[i]!, r));
+    for (const c of calls) if (!done.has(c)) done.set(c, await this.call(c, ctx));
+    return calls.map((c) => done.get(c)!);
   }
 
   private async call(c: ToolCall, ctx: ToolContext): Promise<ToolResult> {
+    let savedAs: string | undefined;
     const finish = (output: string, isError: boolean): ToolResult => {
       this.trace.push(`${isError ? '✗' : '✓'} ${c.name} ${describeInput(c.input, 60)}`);
       this.ui.observation(!isError, output);
       this.session.log({ agent: this.role, event: 'tool', name: c.name, input: c.input, isError, output: output.slice(0, 4000) });
-      return { id: c.id, name: c.name, output, isError };
+      return { id: c.id, name: c.name, output, isError, ...(savedAs ? { savedAs } : {}) };
     };
     const tool = this.tools.find((t) => t.name === c.name);
     this.ui.tool(c.name, describeInput(c.input));
@@ -342,7 +344,11 @@ export class Agent {
       const previous = guarded === null ? null : readIfExists(path.resolve(ctx.root, guarded));
       const blockingBefore = new Set(guarded === null || previous === null ? [] : typeErrors(ctx.root, guarded).filter((e) => e.blocking).map((e) => e.key));
       let output = await tool.run(c.input, ctx);
-      if (!PAGED_TOOLS.includes(c.name)) output = await offload(output, ctx.root, `outputs/${this.session.id}/${c.name}-${c.id.replace(/[^\w-]/g, '')}.txt`);
+      if (!PAGED_TOOLS.includes(c.name)) {
+        const off = await offload(output, ctx.root, `outputs/${this.session.id}/${c.name}-${c.id.replace(/[^\w-]/g, '')}.txt`);
+        output = off.text;
+        savedAs = off.file;
+      }
       if (c.name === 'skill') {
         const wanted = (this.session.skills.find((s) => s.name === c.input.name)?.tools ?? []).map(toolKey);
         const names = this.deferred.filter((t) => wanted.includes(toolKey(t.name)) || wanted.includes(toolKey(t.group ?? ''))).map((t) => t.name);

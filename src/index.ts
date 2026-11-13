@@ -46,7 +46,7 @@ Opções:
       --fork                         com -c ou -r: continua numa cópia, sem alterar a original
   -h, --help
 
-Variáveis: OLLAMA_HOST, ANTHROPIC_API_KEY, ALIEN_MODEL, ALIEN_ENGINE, ALIEN_EMBED_MODEL, ALIEN_LANG`;
+Variáveis: OLLAMA_HOST, ANTHROPIC_API_KEY, ALIEN_MODEL, ALIEN_ENGINE, ALIEN_SANDBOX, ALIEN_EMBED_MODEL, ALIEN_LANG`;
 
 const COMMANDS = `Comandos:
   /plan                    mostra o plano atual

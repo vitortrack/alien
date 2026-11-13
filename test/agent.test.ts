@@ -122,9 +122,38 @@ test('reflection: a reviewer rejection sends the agent back to work, then approv
   assert.equal(out, 'fixed');
   assert.equal(reviews, 2);
   assert.equal(fs.readFileSync(path.join(root, 'a.txt'), 'utf8'), 'v2');
-  const memory = fs.readFileSync(memoryFile(root), 'utf8');
-  assert.doesNotMatch(memory, /"kind":"lesson"/);
-  assert.match(memory, /"kind":"episode"/);
+  assert.equal(fs.existsSync(memoryFile(root)), false, 'an unverified outcome must not become a memory');
+});
+
+test('memory: the episode is stored only when something ran after the last edit', async () => {
+  const root = workspace();
+  const ui = UI.create();
+  try {
+    const provider = new ScriptedProvider([
+      () => call('write_file', { path: 'a.txt', content: 'v1' }),
+      () => call('bash', { command: 'cat a.txt' }),
+      () => call('bash', { command: 'touch b.txt' }),
+      () => answer('done'),
+    ]);
+    await new Session(config(root), ui, () => provider).run('write v1 to a.txt');
+    assert.match(fs.readFileSync(memoryFile(root), 'utf8'), /"kind":"episode"/);
+  } finally {
+    ui.close();
+  }
+});
+
+test('ALIEN_SKIP_END switches off one end-of-task step for ablation runs', async () => {
+  const root = workspace();
+  const ui = UI.create();
+  process.env.ALIEN_SKIP_END = 'verify,requirements';
+  try {
+    const provider = new ScriptedProvider([() => call('write_file', { path: 'a.ts', content: 'export const a = 1;\n' }), () => answer('done')]);
+    const out = await new Session(config(root), ui, () => provider).run('create a.ts');
+    assert.equal(out, 'done');
+  } finally {
+    delete process.env.ALIEN_SKIP_END;
+    ui.close();
+  }
 });
 
 test('read-only mode denies writes and the loop guard stops identical repeated calls', async () => {
@@ -221,6 +250,29 @@ function stubJudge(replies: unknown[]): Judge & { prompts: string[] } {
 }
 
 const slice = (title: string, check: string) => ({ title, spec: `faça: ${title}`, files: ['x.txt'], criteria: [{ text: title, check, guard: false }] });
+
+test('a batch mixing reads and a write runs the reads first and returns every result in the order asked', async () => {
+  const root = workspace();
+  fs.writeFileSync(path.join(root, 'a.txt'), 'A\n');
+  const batch = (): StepResult => ({
+    text: '',
+    toolCalls: [
+      { id: 'r1', name: 'read_file', input: { path: 'a.txt' } },
+      { id: 'w1', name: 'write_file', input: { path: 'b.txt', content: 'B\n' } },
+      { id: 'r2', name: 'list_dir', input: { path: '.' } },
+    ],
+    stop: 'tool_use',
+    usage,
+  });
+  const provider = new ScriptedProvider([batch, () => answer('ok')]);
+  const ui = UI.create();
+  await new Session(config(root), ui, () => provider).run('x');
+  ui.close();
+  const results = provider.results[0]!;
+  assert.deepEqual(results.map((r) => r.id), ['r1', 'w1', 'r2']);
+  assert.match(results[0]!.output, /A/);
+  assert.equal(fs.readFileSync(path.join(root, 'b.txt'), 'utf8'), 'B\n');
+});
 
 test('orchestrator: a slice goes back to a fresh worker with the gate failures until its checks pass', async () => {
   const root = workspace();
@@ -582,6 +634,8 @@ test('offload: a huge tool output is saved to a git-ignored file and the model g
     assert.equal(full.split('\n').length, 50001);
     assert.match(full, /\n25000\n/);
     assert.equal(provider.results[1]![0]!.output, 'small\n[exit code 0]');
+    assert.equal(provider.results[0]![0]!.savedAs, saved);
+    assert.equal(provider.results[1]![0]!.savedAs, undefined);
     assert.equal(execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }), '');
   } finally {
     ui.close();

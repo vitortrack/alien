@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentUI } from '../src/agent-ui.js';
-import { judgeTool, sdkEnv, show, type ShowState } from '../src/sdk-engine.js';
+import { judgeTool, sandboxSettings, sdkEnv, show, type ShowState } from '../src/sdk-engine.js';
 
 test('sdk engine: ollama points the Agent SDK at the local Anthropic-compatible endpoint with the chosen model everywhere', () => {
   const env = sdkEnv('ollama', 'glm-5.3-flash:cloud', { PATH: '/bin', OLLAMA_HOST: 'http://h:1' });
@@ -47,4 +47,15 @@ test('sdk engine: streamed thinking and text reach the UI live and are not repea
   show(delta({ type: 'text_delta', text: 'oi' }), ui, state);
   show({ type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'thinking', thinking: 'hmm' }, { type: 'text', text: 'oi' }, { type: 'tool_use', name: 'Read', input: {} }] } } as unknown as SDKMessage, ui, state);
   assert.deepEqual(seen, ['think:hmm', 'text:oi', 'tool:Read']);
+});
+
+test('sdk engine: with ALIEN_SANDBOX=on, Bash runs sandboxed, cannot escape, reads no .env or home credentials, reaches only npm and runs docker/psql outside', () => {
+  assert.equal(sandboxSettings('/repo', {}), undefined);
+  const s = sandboxSettings('/repo', { ALIEN_SANDBOX: 'on' })!;
+  assert.equal(s.enabled, true);
+  assert.equal(s.allowUnsandboxedCommands, false);
+  assert.ok(s.filesystem?.denyRead?.includes('/repo/**/.env'));
+  assert.ok(s.filesystem?.denyRead?.includes('~/.ssh'));
+  assert.deepEqual(s.network?.allowedDomains, ['registry.npmjs.org', '*.npmjs.org']);
+  assert.deepEqual(s.excludedCommands, ['docker *', 'psql *']);
 });

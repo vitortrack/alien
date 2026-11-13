@@ -9,6 +9,8 @@ type OllamaMessage = {
   tool_calls?: OllamaToolCall[];
   tool_name?: string;
   images?: string[];
+  thinking?: string;
+  saved?: string;
 };
 
 type OllamaChunk = {
@@ -28,6 +30,7 @@ const DEDUP_OVER = 200;
 const ARG_OVER = 1000;
 const CLOUD_CTX_CAP = 262_144;
 const KEEP_RECENT = 8;
+const RECENT_READS = 5;
 const COMPACT_MAX_TOKENS = 150_000;
 export const compactAt = (ctx: number): number => Math.min(ctx * COMPACT_AT, COMPACT_MAX_TOKENS);
 
@@ -99,7 +102,7 @@ export class OllamaProvider implements Provider {
 
   addToolResults(results: ToolResult[]): void {
     for (const r of results) {
-      this.history.push({ role: 'tool', tool_name: r.name, content: r.isError ? `ERROR: ${r.output}` : r.output });
+      this.history.push({ role: 'tool', tool_name: r.name, content: r.isError ? `ERROR: ${r.output}` : r.output, ...(r.savedAs ? { saved: r.savedAs } : {}) });
     }
   }
 
@@ -111,7 +114,7 @@ export class OllamaProvider implements Provider {
         model: this.model,
         stream: true,
         ...(think ? { think: true } : {}),
-        messages: [{ role: 'system', content: req.system }, ...this.withElidedObservations().map(({ images, ...m }) => (vision && images ? { ...m, images } : m))],
+        messages: [{ role: 'system', content: req.system }, ...this.withElidedObservations().map(({ images, saved: _saved, ...m }) => (vision && images ? { ...m, images } : m))],
         tools: req.tools.map((t: ToolSpec) => ({
           type: 'function',
           function: { name: t.name, description: t.description, parameters: t.schema },
@@ -122,13 +125,17 @@ export class OllamaProvider implements Provider {
     );
 
     let text = '';
+    let thinking = '';
     let toolCalls: OllamaToolCall[] = [];
     let usage: Usage = { input: 0, output: 0 };
     let doneReason = '';
     for await (const chunk of this.chunks(res)) {
       if (chunk.error) throw new Error(`Ollama: ${chunk.error}`);
       const m = chunk.message;
-      if (m?.thinking) req.onThinking(m.thinking);
+      if (m?.thinking) {
+        thinking += m.thinking;
+        req.onThinking(m.thinking);
+      }
       if (m?.content) {
         text += m.content;
         req.onText(m.content);
@@ -142,7 +149,7 @@ export class OllamaProvider implements Provider {
     this.lastPromptTokens = usage.input;
 
     if (!toolCalls.length) toolCalls = parseInlineToolCalls(text, new Set(req.tools.map((t) => t.name)));
-    this.history.push({ role: 'assistant', content: text, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) });
+    this.history.push({ role: 'assistant', content: text, ...(thinking ? { thinking } : {}), ...(toolCalls.length ? { tool_calls: toolCalls } : {}) });
 
     const calls: ToolCall[] = toolCalls.map((c) => ({
       id: randomUUID(),
@@ -161,9 +168,10 @@ export class OllamaProvider implements Provider {
     this.history.forEach((m, i) => m.role === 'tool' && m.content.length > DEDUP_OVER && newest.set(m.content, i));
     return this.history.map((m, i) => {
       if (m.role === 'tool' && (newest.get(m.content) ?? i) !== i) return { ...m, content: '[identical to a later output of this tool; see the latest copy]' };
-      if (shrink.has(i)) return { ...m, tool_calls: m.tool_calls!.map(shrinkArgs) };
+      if (shrink.has(i)) return { ...m, tool_calls: m.tool_calls!.map(shrinkArgs), thinking: undefined };
       if (!elide.has(i) || m.content.length <= ELIDE_OVER) return m;
-      return { ...m, content: `${m.content.slice(0, 600)}\n… [older tool output elided to save context; run the tool again if you need it]` };
+      const where = m.saved ? `the full output is saved in ${m.saved}: read_file or grep it instead of running the tool again` : 'run the tool again if you need it';
+      return { ...m, content: `${m.content.slice(0, 600)}\n… [older tool output elided to save context; ${where}]` };
     });
   }
 
@@ -237,7 +245,7 @@ export class OllamaProvider implements Provider {
       .slice(0, cut)
       .map((m) => {
         const calls = m.tool_calls?.map((c) => `${c.function.name}(${JSON.stringify(c.function.arguments).slice(0, 300)})`).join(', ');
-        return `[${m.role}${m.tool_name ? `:${m.tool_name}` : ''}] ${m.content.slice(0, 1500)}${calls ? ` -> calls ${calls}` : ''}`;
+        return `[${m.role}${m.tool_name ? `:${m.tool_name}` : ''}] ${m.content.slice(0, 1500)}${m.saved ? ` (full output saved in ${m.saved})` : ''}${calls ? ` -> calls ${calls}` : ''}`;
       })
       .join('\n');
     const res = await this.post(
@@ -260,10 +268,21 @@ export class OllamaProvider implements Provider {
     );
     const summary = ((await res.json()) as { message?: { content?: string } }).message?.content ?? '';
     const kept = this.history.slice(cut);
+    const recentReads = [
+      ...new Set(
+        this.history
+          .slice(0, cut)
+          .flatMap((m) => m.tool_calls ?? [])
+          .filter((c) => c.function.name === 'read_file')
+          .map((c) => parseArgs(c.function.arguments).path)
+          .filter((p): p is string => typeof p === 'string')
+          .reverse(),
+      ),
+    ].slice(0, RECENT_READS);
     const pinned: OllamaMessage[] = task && !kept.some((m) => m.role === 'user' && m.content.includes(task)) ? [{ role: 'user', content: `[Original request, verbatim]\n${task}` }] : [];
     this.history = [
       ...pinned,
-      { role: 'user', content: `[Checkpoint of earlier work in this session] Continue from "Next step" below. Do not explore the project again: what you learned is summarized here. Re-read a file only right before you edit it.${changedFiles.length ? `\nFiles you already changed in this task: ${changedFiles.join(', ')}` : ''}\n${summary}` },
+      { role: 'user', content: `[Checkpoint of earlier work in this session] Continue from "Next step" below. Do not explore the project again: what you learned is summarized here. Re-read a file only right before you edit it.${changedFiles.length ? `\nFiles you already changed in this task: ${changedFiles.join(', ')}` : ''}${recentReads.length ? `\nFiles you read most recently: ${recentReads.join(', ')}` : ''}\n${summary}` },
       ...kept,
     ];
     this.lastPromptTokens = 0;

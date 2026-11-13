@@ -49,6 +49,7 @@ export interface Tool extends ToolSpec {
 }
 
 const MAX_OUTPUT = 20_000;
+export const SAVE_OVER = 1_500;
 const OFFLOAD_HEAD = 2_400;
 const OFFLOAD_TAIL = 3_600;
 const RPC_TOOLS = ['read_file', 'grep', 'glob', 'list_dir', 'bash'];
@@ -105,12 +106,13 @@ export async function writeScratch(root: string, name: string): Promise<{ file: 
   return { file, write: (text) => fs.writeFile(abs, text) };
 }
 
-export async function offload(text: string, root: string, name: string): Promise<string> {
-  if (text.length <= MAX_OUTPUT) return text;
+export async function offload(text: string, root: string, name: string): Promise<{ text: string; file?: string }> {
+  if (text.length <= SAVE_OVER) return { text };
   const scratch = await writeScratch(root, name);
   await scratch.write(text);
+  if (text.length <= MAX_OUTPUT) return { text, file: scratch.file };
   const lines = text.split('\n').length;
-  return `${text.slice(0, OFFLOAD_HEAD)}\n... [output too long: ${text.length} characters, ${lines} lines. The full output is saved in ${scratch.file}: grep it or read the lines you need with read_file offset/limit instead of running the command again] ...\n${text.slice(-OFFLOAD_TAIL)}`;
+  return { file: scratch.file, text: `${text.slice(0, OFFLOAD_HEAD)}\n... [output too long: ${text.length} characters, ${lines} lines. The full output is saved in ${scratch.file}: grep it or read the lines you need with read_file offset/limit instead of running the command again] ...\n${text.slice(-OFFLOAD_TAIL)}` };
 }
 
 export function toolLoader(deferred: Tool[], load: (names: string[]) => void): Tool {

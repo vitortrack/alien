@@ -36,9 +36,6 @@ Only make changes that are directly requested or clearly necessary. Don't add fe
 - Destructive or irreversible actions (deleting data, force-pushing, dropping tables) need an explicit request from the user.
 - Never edit or skip existing tests, hard-code expected values or special-case inputs to make checks pass. If a test or the existing code contradicts the request, call report_conflict with the evidence.
 
-# Talking while you work
-Between tool calls, write at most one short sentence about what you will do next.
-
 # Answering questions
 Answer first, then show the evidence as path/to/file.ts:42 with only the relevant lines. Say what you did not verify.
 

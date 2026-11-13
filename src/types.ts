@@ -28,6 +28,7 @@ export interface ToolResult {
   name: string;
   output: string;
   isError: boolean;
+  savedAs?: string;
 }
 
 export interface Usage {
