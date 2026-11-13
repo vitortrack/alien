@@ -17,11 +17,12 @@ export type PlanStatus = 'pending' | 'in_progress' | 'done';
 export type PlanItem = { step: string; status: PlanStatus };
 export type DelegateRole = 'explorer' | 'worker';
 export type Decision = 'yes' | 'no' | 'always';
-export type ToolGroup = 'web' | 'memory';
+export type ToolGroup = 'web' | 'memory' | 'search';
 
 const TOOL_GROUPS: Record<ToolGroup, string> = {
   web: 'fetches a URL (documentation, APIs)',
   memory: 'saves notes for future sessions',
+  search: 'semantic search over an embedding index of the codebase (slow on first use: it indexes the whole repository)',
 };
 
 export interface ToolContext {
@@ -645,6 +646,7 @@ export const allTools: Tool[] = [
   {
     name: 'semantic_search',
     readOnly: true,
+    group: 'search',
     description:
       'Search the codebase by meaning (RAG: vector embeddings + BM25 over indexed chunks). Use it first when you do not know where something lives; use grep for exact identifiers. Write the query as the question followed by likely English identifiers and domain words that would appear in the code, e.g. "onde o CPF é validado | validate cpf document validator isValidCpf". The index updates itself incrementally.',
     schema: {

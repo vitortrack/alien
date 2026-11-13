@@ -101,7 +101,7 @@
           "default": "sdk",
           "enumDescriptions": [
             "Laço próprio do Alien (ferramentas, poda e compactação do Alien)",
-            "Claude Agent SDK: o harness do Claude Code (ferramentas, compactação, subagentes, skills e CLAUDE.md do projeto), rodando com o modelo escolhido — Ollama ou Claude"
+            "Claude Agent SDK (ferramentas, compactação, subagentes, skills e CLAUDE.md do projeto), rodando com o modelo escolhido — Ollama ou Claude"
           ],
           "description": "Motor do agente."
         },

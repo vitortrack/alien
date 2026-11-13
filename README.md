@@ -26,7 +26,7 @@ O mesmo núcleo roda no CLI e na extensão do VS Code, então os requisitos são
   - **Ou Claude**, com `ANTHROPIC_API_KEY` no ambiente. Na extensão, a variável precisa existir no ambiente em que o VS Code foi aberto.
 - **Linux ou macOS, com `bash`, `git`, `grep` e `find` no PATH** (os dois já trazem). No **Windows**, o Alien roda dentro do WSL: veja o [Guia passo a passo](#guia-passo-a-passo-vs-code).
 
-O Alien não depende do Claude Code: o modo multiagente (`--orchestrate`), as checagens de pronto (`--gate`) e a reescrita de harness (`src/rhi.ts`) usam o mesmo modelo configurado para o agente, por meio de um agente do próprio Alien só de leitura, que devolve as decisões em JSON validado.
+Por padrão o agente roda sobre o Claude Agent SDK (`--engine sdk`, ou `alien.engine` na extensão), com o modelo configurado — Ollama ou Claude; `--engine alien` usa o laço próprio do Alien. O modo multiagente (`--orchestrate`), as checagens de pronto (`--gate`) e a reescrita de harness (`src/rhi.ts`) usam esse mesmo modelo, por meio de um agente só de leitura que devolve as decisões em JSON validado.
 
 **Opcional, por recurso**
 

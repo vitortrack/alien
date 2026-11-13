@@ -611,8 +611,8 @@ test('progressive tools: rare tools stay out of the prompt until load_tools or a
     await session.run('quanto é 6 vezes 7?');
     const [first, , third] = provider.results.map((r) => r[0]!);
     assert.match(first!.output, /^Unknown tool "web_fetch"\. Available tools: .*\bload_tools\b/);
-    for (const hidden of ['web_fetch', 'remember']) assert.ok(!offered[0]!.includes(hidden), hidden);
-    assert.ok(offered[0]!.includes('semantic_search') && offered[0]!.includes('recall') && offered[0]!.includes('run_code'));
+    for (const hidden of ['web_fetch', 'remember', 'semantic_search']) assert.ok(!offered[0]!.includes(hidden), hidden);
+    assert.ok(offered[0]!.includes('recall') && offered[0]!.includes('run_code'));
     assert.match(provider.results[1]![0]!.output, /^Loaded: web_fetch\./);
     assert.equal(third!.isError, false);
     assert.match(third!.output, /^42\n/);

@@ -156,7 +156,6 @@ export class Agent {
     this.changed = false;
     this.callCounts.clear();
     this.verifiedSinceEdit = true;
-    if (this.role === 'main') void this.session.codeIndex.update(this.session.signal).catch(() => undefined);
     this.provider.addUser(await this.withRecall(task, this.opening(task)), images);
     const gated = this.role === 'main' && Boolean(cfg.gate?.length);
     this.session.log({ agent: this.role, event: 'task', task });
