@@ -75,6 +75,7 @@ export class Session {
   readonly codeIndex: CodeIndex;
   readonly memory: MemoryStore;
   readonly skills: Skill[];
+  readonly activeSkills = new Set<string>();
   readonly allowed = new Set<string>();
   readonly sessions: SessionStore;
   id = newSessionId();

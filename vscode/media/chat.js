@@ -336,6 +336,9 @@
   window.addEventListener('message', (event) => {
     const m = event.data;
     switch (m.type) {
+      case 'skills':
+        skills = Array.isArray(m.skills) ? m.skills : [];
+        break;
       case 'words':
         if (Array.isArray(m.words) && m.words.length) words = m.words;
         break;
@@ -451,7 +454,8 @@
     messages.querySelector('.welcome')?.remove();
     stick = true;
     const names = attached.length ? `<div class="muted">📎 ${attached.map((a) => esc(a.name)).join(', ')}</div>` : '';
-    add('msg user', esc(text).replace(/\n/g, '<br>') + names);
+    if (work) endThought();
+    add('msg user', esc(text).replace(/\n/g, '<br>') + names, work ? work.el : messages);
     vscode.postMessage({ type: 'send', text, orchestrate: orchestrate.checked, best3: best3.checked, attachments: attached });
     input.value = '';
     attached = [];
@@ -462,7 +466,54 @@
     e.preventDefault();
     send();
   });
+  const slash = $('slash');
+  let skills = [];
+  let picks = [];
+  let slashAt = 0;
+
+  function renderSlash() {
+    const m = /^\/([\w:.-]*)$/.exec(input.value);
+    const q = m ? m[1].toLowerCase() : null;
+    picks = q === null ? [] : skills.filter((s) => s.name.toLowerCase().includes(q));
+    slash.hidden = !picks.length;
+    slashAt = Math.min(slashAt, Math.max(picks.length - 1, 0));
+    slash.innerHTML = picks
+      .map((s, i) => `<div class="slash-item${i === slashAt ? ' on' : ''}" role="option" data-i="${i}"><b>/${esc(s.name)}</b> <span class="muted">${esc(s.description)}</span></div>`)
+      .join('');
+  }
+
+  function choose(i) {
+    input.value = `/${picks[i].name} `;
+    picks = [];
+    slash.hidden = true;
+    input.focus();
+  }
+
+  input.addEventListener('input', renderSlash);
+  slash.addEventListener('mousedown', (e) => {
+    const item = e.target.closest('.slash-item');
+    if (!item) return;
+    e.preventDefault();
+    choose(Number(item.dataset.i));
+  });
   input.addEventListener('keydown', (e) => {
+    if (!slash.hidden) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        slashAt = (slashAt + (e.key === 'ArrowDown' ? 1 : picks.length - 1)) % picks.length;
+        renderSlash();
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        choose(slashAt);
+        return;
+      }
+      if (e.key === 'Escape') {
+        slash.hidden = true;
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       send();

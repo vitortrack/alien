@@ -7,6 +7,7 @@ import { bestOf } from '../../src/attempts.js';
 import { orchestrate } from '../../src/orchestrator.js';
 import { DEFAULT_EMBED_MODEL, DEFAULT_MODEL, Session, type Config, type ProviderName } from '../../src/session.js';
 import { SessionStore } from '../../src/sessions.js';
+import { findSkills, skillCommand } from '../../src/skills.js';
 import { THINKING_WORDS } from '../../src/thinking-words.js';
 import type { Decision, Mode, PlanItem } from '../../src/tools.js';
 import type { Image } from '../../src/types.js';
@@ -98,7 +99,7 @@ function readConfig(root: string): Config {
     model: c.get<string>('model', '') || DEFAULT_MODEL[provider],
     mode: c.get<Mode>('mode', 'ask'),
     root,
-    maxSteps: c.get<number>('maxSteps', 80),
+    maxSteps: c.get<number>('maxSteps', 0),
     review: c.get<boolean>('review', false),
     effort: 'high',
     numCtx: 65536,
@@ -195,6 +196,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
 </main>
 <form id="composer">
   <div id="attachments" hidden></div>
+  <div id="slash" role="listbox" hidden></div>
   <textarea id="input" rows="3" placeholder="Pergunte ou peça uma tarefa… (cole um print com Ctrl+V ou arraste arquivos)"></textarea>
   <div class="actions">
     <input type="file" id="file" multiple hidden>
@@ -245,6 +247,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
         previous.save();
         const saved = previous.sessions.load(previous.id);
         if (saved) this.session.resume(saved);
+        for (const name of previous.activeSkills) this.session.activeSkills.add(name);
       }
     } else {
       Object.assign(this.session.cfg, { mode: cfg.mode, lang: cfg.lang, review: cfg.review, maxSteps: cfg.maxSteps });
@@ -261,6 +264,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
           const cfg = readConfig(root);
           this.post({ type: 'status', text: `${cfg.provider} · ${cfg.model} · ${cfg.mode}` });
           this.post({ type: 'models', models: await localModels(cfg.model), current: cfg.model });
+          this.post({ type: 'skills', skills: findSkills(root).map(({ name, description }) => ({ name, description })) });
           this.restore(root);
         }
         return;
@@ -299,6 +303,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
     if (!task && !attachments.length) return;
     const session = this.ensureSession();
     if (!session) return;
+    task = skillCommand(session.skills, session.activeSkills, task) ?? task;
     if (session.busy) {
       if (!this.plainRun || attachments.length || viaOrchestrator || best3) {
         this.post({ type: 'warn', message: 'Aguarde a tarefa atual terminar ou clique em Parar.' });

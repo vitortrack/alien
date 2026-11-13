@@ -1,4 +1,5 @@
 import { systemPrompt, type Role } from './prompts.js';
+import { activeSkillsBlock } from './skills.js';
 import { changedFiles, nestedInstructions, scopeReport, workspaceDiff } from './scope.js';
 import type { CheckResult } from './contract.js';
 import { isJudged, orderedChecks } from './gate.js';
@@ -35,7 +36,7 @@ const MAX_SCOPE_CHECKS = 2;
 const RUN_END = 'This run is ending. The next run continues this work from a handoff note only, without your context.';
 const HANDOFF_REQUEST = (lead: string): string =>
   `[handoff] ${lead} Write that note now, without calling tools, with exactly these sections:\n## State (what is done and verified, with file paths)\n## Decisions (choices made and why, constraints learned)\n## Tried and failed (each approach that did not work, with the exact error, so the next run does not repeat it)\n## Next steps (what remains, in order)\nBe dense and factual: keep exact paths, identifiers, commands and error strings.`;
-const stepsLeft = (max: number, step: number): string => `You have used ${step} of your ${max} steps (${max - step} left).`;
+const stepsLeft = (max: number, step: number): string => (max > 0 ? `You have used ${step} of your ${max} steps (${max - step} left).` : `You have used ${step} steps (no step limit).`);
 const gateList = (results: CheckResult[]): string => results.map((r) => `- ${r.criterion.text}\n  $ ${r.criterion.check}${r.pass ? '' : `\n  ${r.output.trim().slice(-600).replace(/\n/g, '\n  ') || '(no output)'}`}`).join('\n');
 const VERIFY_NUDGE =
   '[verification] You changed code but have not run anything since your last edit. Before your final answer, run the tests, build or type-check that cover the change (or execute the changed code) and read the whole output; fix what fails. If nothing in this project can be run, say so explicitly in the final answer.';
@@ -106,8 +107,12 @@ export class Agent {
 
   private get system(): string {
     const { root, lang, interactive = false } = this.session.cfg;
-    const key = `${lang}|${interactive}`;
-    if (this.systemCache?.key !== key) this.systemCache = { key, text: systemPrompt(this.role, root, lang, interactive, this.tools.some((t) => t.name === 'skill') ? this.session.skills : []) };
+    const key = `${lang}|${interactive}|${[...this.session.activeSkills].join(',')}`;
+    if (this.systemCache?.key !== key)
+      this.systemCache = {
+        key,
+        text: [systemPrompt(this.role, root, lang, interactive, this.tools.some((t) => t.name === 'skill') ? this.session.skills : []), activeSkillsBlock(this.session.skills, this.session.activeSkills)].filter(Boolean).join('\n\n'),
+      };
     return this.systemCache.text;
   }
 
@@ -129,7 +134,7 @@ export class Agent {
     const head = previous ? `<previous_handoff>\nNote left by the previous run on this work. Trust it instead of exploring again what it covers; re-read a file only right before you edit it.\n${previous.trim()}\n</previous_handoff>\n\n` : '';
     const tail = gate?.length ? `\n\nDone means every check below exits 0 when run from the repository root; they are run automatically before you finish. Implement the behavior they describe; do not write code just to satisfy a command.\n${gate.map((c) => `- ${c.text}\n  $ ${c.check}`).join('\n')}` : '';
     const block = harness?.trim() ? `<task_harness>\n${harness.trim()}\n</task_harness>\n\n` : '';
-    return `${head}${block}${task}${tail}\n\nYou have up to ${this.session.cfg.maxSteps} steps for this task. Call the status tool whenever you want to know how many are left.`;
+    return `${head}${block}${task}${tail}${this.session.cfg.maxSteps > 0 ? `\n\nYou have up to ${this.session.cfg.maxSteps} steps for this task. Call the status tool whenever you want to know how many are left.` : ''}`;
   }
 
   private judgeRejections = 0;
@@ -166,7 +171,7 @@ export class Agent {
     this.trace.length = 0;
 
     try {
-      for (let step = 1; step <= cfg.maxSteps; step++) {
+      for (let step = 1; cfg.maxSteps <= 0 || step <= cfg.maxSteps; step++) {
         this.step = step;
         if (this.role === 'main') {
           for (const message of this.session.takeQueued()) {

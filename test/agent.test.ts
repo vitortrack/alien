@@ -871,3 +871,38 @@ test('a message sent while the agent works reaches it at the next step and joins
   ui.close();
   assert.equal(session.turns[0]!.task, 'start the server\n\nuse port 8081');
 });
+
+test('a /skill command turns the skill on for every step until /skill off', async () => {
+  const { skillCommand, activeSkillsBlock } = await import('../src/skills.js');
+  const root = workspace();
+  fs.mkdirSync(path.join(root, '.claude/skills/lazy'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.claude/skills/lazy/SKILL.md'), '---\nname: lazy\ndescription: Be lazy\n---\nWrite less code.\n');
+  let seen = '';
+  const provider = new ScriptedProvider([
+    ({ system }) => {
+      seen = system;
+      return answer('ok');
+    },
+  ]);
+  const ui = UI.create();
+  const session = new Session(config(root), ui, () => provider);
+  const task = skillCommand(session.skills, session.activeSkills, '/lazy fix the bug')!;
+  assert.equal(task, 'fix the bug');
+  await session.run(task);
+  ui.close();
+  assert.match(seen, /<active_skills>[\s\S]*Write less code\./);
+  skillCommand(session.skills, session.activeSkills, '/lazy off');
+  assert.equal(activeSkillsBlock(session.skills, session.activeSkills), '');
+  assert.equal(skillCommand(session.skills, session.activeSkills, '/unknown x'), null);
+  assert.equal(skillCommand(session.skills, session.activeSkills, 'lazy please'), null);
+});
+
+test('maxSteps 0 means no step limit: the agent runs until it answers', async () => {
+  const root = workspace();
+  const provider = new ScriptedProvider([...Array.from({ length: 12 }, (_, i) => () => call('list_dir', { path: '.', n: i })), () => answer('done')]);
+  const ui = UI.create();
+  const session = new Session(config(root, { maxSteps: 0 }), ui, () => provider);
+  const out = await session.run('explore');
+  ui.close();
+  assert.equal(out, 'done');
+});

@@ -77,13 +77,20 @@ body {
 }
 
 .msg.user {
+  padding: 4px 6px;
+  border-radius: 4px;
+  white-space: pre-wrap;
   background: var(--vscode-input-background);
   border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
 }
 
 .msg.assistant {
-  background: var(--vscode-editor-background);
-  border: 1px solid var(--vscode-panel-border);
+  padding: 0;
+}
+
+#messages > *,
+.timeline > * {
+  animation: enter 0.15s ease-out;
 }
 
 .msg p {
@@ -360,7 +367,6 @@ details.obs pre {
 @keyframes enter {
   from {
     opacity: 0;
-    transform: translateY(4px);
   }
 }
 
@@ -554,4 +560,24 @@ button.secondary,
 #stop {
   color: var(--vscode-button-secondaryForeground);
   background: var(--vscode-button-secondaryBackground);
+}
+
+#slash {
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-radius: 6px;
+  background: var(--vscode-editorSuggestWidget-background, var(--vscode-editor-background));
+  margin-bottom: 4px;
+}
+.slash-item {
+  padding: 4px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.slash-item.on {
+  background: var(--vscode-list-activeSelectionBackground);
+  color: var(--vscode-list-activeSelectionForeground);
 }

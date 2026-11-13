@@ -2,7 +2,7 @@
   "name": "alien",
   "displayName": "Alien — Agente de Código",
   "description": "Agente de código autônomo em formato de chat: ReAct, planejamento, revisão independente, multiagente, RAG e memória — local com Ollama ou com Claude.",
-  "version": "0.1.11",
+  "version": "0.1.17",
   "publisher": "vitortrack",
   "license": "MIT",
   "repository": {
@@ -104,8 +104,8 @@
         },
         "alien.maxSteps": {
           "type": "number",
-          "default": 80,
-          "description": "Limite de passos por agente."
+          "default": 0,
+          "description": "Limite de passos por mensagem. 0 = sem limite: o agente só para quando concluir ou quando você clicar em Parar."
         },
         "alien.embedModel": {
           "type": "string",
