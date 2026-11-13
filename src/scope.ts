@@ -5,24 +5,6 @@ import { promisify } from 'node:util';
 
 const execFileP = promisify(execFile);
 
-const PERSISTENCE = ['salv', 'grav', 'persist', 'save'];
-const UI = ['tela', 'página', 'pagina', 'menu', 'formulário', 'formulario', 'botão', 'botao', 'campo', 'listagem', 'screen', 'page', 'form', 'button', 'front'];
-
-const SYNONYMS: Record<string, string[]> = {
-  api: ['api', 'endpoint', 'backend', 'servidor', 'server', 'rota da api', ...PERSISTENCE],
-  backend: ['backend', 'back-end', 'servidor', 'server', 'api', 'endpoint', 'permiss', ...PERSISTENCE],
-  server: ['backend', 'servidor', 'server', 'api', ...PERSISTENCE],
-  db: ['banco', 'database', 'migration', 'migração', 'migracao', 'tabela', 'sql', 'schema', 'db', ...PERSISTENCE],
-  migrations: ['banco', 'migration', 'migração', 'migracao', 'schema', 'tabela', ...PERSISTENCE],
-  web: UI,
-  frontend: UI,
-  front: UI,
-  client: UI,
-  ui: UI,
-  infra: ['infra', 'deploy', 'docker', 'terraform'],
-  config: ['config', 'configuração', 'configuracao'],
-};
-
 export function areaOf(file: string): string {
   const parts = file.split('/');
   return parts.length > 1 ? parts[0]! : '.';
@@ -30,20 +12,18 @@ export function areaOf(file: string): string {
 
 const TEST_FILE = /(^|\/)(tests?|__tests__|specs?)\/|\.(spec|test)\.[cm]?[jt]sx?$/;
 
-export function scopeReport(task: string, changed: string[]): string | null {
+export function scopeReport(changed: string[]): string | null {
   const files = changed.filter((f) => !TEST_FILE.test(f));
   if (!files.length) return null;
   const byArea = new Map<string, string[]>();
   for (const f of files) byArea.set(areaOf(f), [...(byArea.get(areaOf(f)) ?? []), f]);
   if (byArea.size < 2) return null;
   const main = [...byArea.entries()].sort((a, b) => b[1].length - a[1].length)[0]![0];
-  const text = task.toLowerCase();
-  const mentioned = (area: string) => [area.toLowerCase(), ...(SYNONYMS[area.toLowerCase()] ?? [])].some((w) => text.includes(w));
-  const extra = [...byArea.keys()].filter((a) => a !== main && a !== '.' && !mentioned(a));
+  const extra = [...byArea.keys()].filter((a) => a !== main && a !== '.');
   if (!extra.length) return null;
   const summary = [...byArea.entries()].map(([a, fs]) => `${a}/ (${fs.length})`).join(', ');
   const list = extra.flatMap((a) => byArea.get(a)!).map((f) => `- ${f}`).join('\n');
-  return `[scope check] Your changes touch: ${summary}. The request does not mention ${extra.map((a) => `${a}/`).join(' or ')}. Files there:\n${list}\nFor each of these files: if the requested behavior works without it, undo that change now (git checkout -- <file> for edited files, delete files you created) and mention it as a suggestion instead. Keep a file only if you can point to the code in the requested flow that breaks without it. Decide by reading the code (grep its usages); do not revert files temporarily or create probe copies to test it. Then give your final answer.`;
+  return `[scope check] Your changes touch: ${summary}. Most of the work is in ${main}/; check the files outside it:\n${list}\nFor each of these files: if the requested behavior works without it, undo that change now (git checkout -- <file> for edited files, delete files you created) and mention it as a suggestion instead. Keep a file only if you can point to the code in the requested flow that breaks without it. Decide by reading the code (grep its usages); do not revert files temporarily or create probe copies to test it. Then give your final answer.`;
 }
 
 export async function changedFiles(root: string): Promise<string[]> {

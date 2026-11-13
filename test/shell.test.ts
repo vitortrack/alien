@@ -99,18 +99,13 @@ test('read-only mode still allows read-only shell commands', async () => {
   assert.match((await permit(bash, { command: 'npm install' }, c))!, /read-only mode/);
 });
 
-test('scope check flags changed areas the request never mentions', async () => {
+test('scope check asks to justify every changed file outside the main area, even when the request names a screen', async () => {
   const { scopeReport } = await import('../src/scope.js');
-  const task = 'Adicione um novo menu de Viagens que registre viagens em memória';
-  const report = scopeReport(task, ['src/menu.js', 'src/routes.js', 'src/store/trips.js', 'backend/permissions/screens.js', 'db/migrations/002.sql']);
-  assert.match(report!, /does not mention backend\/ or db\//);
-  assert.match(report!, /- backend\/permissions\/screens\.js\n- db\/migrations\/002\.sql/);
-  assert.equal(scopeReport(task, ['src/menu.js', 'src/routes.js']), null);
-  assert.equal(scopeReport('crie o endpoint na api e a tela', ['web/a.tsx', 'web/b.tsx', 'api/c.ts']), null);
-  assert.equal(scopeReport(task, ['src/menu.js', 'test.mjs']), null);
-  const fullstack = 'Na tela de Motoristas, adicione o campo Telefone. Ele precisa ser salvo junto com o cadastro e aparecer na listagem.';
-  assert.equal(scopeReport(fullstack, ['web/pages/drivers.js', 'api/drivers.js', 'db/schema.js', 'db/migrations/003.sql']), null);
-  assert.match(scopeReport('Na tela de Motoristas, mude o rótulo CNH', ['web/pages/drivers.js', 'api/drivers.js', 'db/schema.js'])!, /does not mention api\/ or db\//);
+  const report = scopeReport(['api/a.ts', 'api/b.ts', 'api/c.ts', 'web/src/pages/Trackers.tsx']);
+  assert.match(report!, /Most of the work is in api\/; check the files outside it:\n- web\/src\/pages\/Trackers\.tsx/);
+  assert.match(scopeReport(['src/menu.js', 'src/routes.js', 'backend/permissions/screens.js', 'db/migrations/002.sql'])!, /- backend\/permissions\/screens\.js\n- db\/migrations\/002\.sql/);
+  assert.equal(scopeReport(['src/menu.js', 'src/routes.js']), null);
+  assert.equal(scopeReport(['src/menu.js', 'test.mjs']), null);
 });
 
 test('nested CLAUDE.md/AGENTS.md are attached once when a file under them is touched', async () => {
@@ -188,7 +183,6 @@ test('a confirmation that cannot be answered (no terminal) counts as a denial', 
 
 test('scope check ignores test files', async () => {
   const { scopeReport } = await import('../src/scope.js');
-  const task = 'Texto próprio para o alerta quando a viagem termina sem desembarque';
-  assert.equal(scopeReport(task, ['api/src/x.service.ts', 'tests/api/school/x.spec.ts']), null);
-  assert.equal(scopeReport(task, ['src/a.ts', 'src/__tests__/a.test.ts']), null);
+  assert.equal(scopeReport(['api/src/x.service.ts', 'tests/api/school/x.spec.ts']), null);
+  assert.equal(scopeReport(['src/a.ts', 'src/__tests__/a.test.ts']), null);
 });

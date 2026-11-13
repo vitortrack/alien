@@ -71,6 +71,8 @@ export class Agent {
   private readonly touched = new Set<string>();
   private readonly instructionsSeen = new Set<string>();
   private verifiedSinceEdit = true;
+  private dirtyBeforeConversation: Set<string> | null = null;
+  private lastScopeReport: string | null = null;
   private readonly trace: string[] = [];
 
   constructor(
@@ -166,8 +168,8 @@ export class Agent {
     let verifyNudges = 0;
     let requirementsChecked = this.role !== 'main';
     let approvedDiff: string | null = null;
-    let lastScopeReport: string | null = null;
-    const dirtyAtStart = new Set(this.role === 'main' ? await changedFiles(cfg.root) : []);
+    if (this.role === 'main') this.dirtyBeforeConversation ??= new Set(await changedFiles(cfg.root));
+    const dirtyAtStart = this.dirtyBeforeConversation ?? new Set<string>();
     this.touched.clear();
     this.trace.length = 0;
 
@@ -247,13 +249,13 @@ export class Agent {
             approvedDiff = diff;
             this.ui.info('revisor aprovou o trabalho');
           }
-          if (this.role === 'main' && !skip.has('scope') && this.changed && scopeChecks < MAX_SCOPE_CHECKS) {
+          if (this.role === 'main' && !skip.has('scope') && scopeChecks < MAX_SCOPE_CHECKS) {
             scopeChecks++;
             const now = (await changedFiles(cfg.root)).filter((f) => !dirtyAtStart.has(f) || this.touched.has(f));
-            const report = scopeReport(task, now);
-            if (report && report !== lastScopeReport) {
-              lastScopeReport = report;
-              this.ui.warn('checagem de escopo: alterações em áreas que o pedido não menciona');
+            const report = scopeReport(now);
+            if (report && report !== this.lastScopeReport) {
+              this.lastScopeReport = report;
+              this.ui.warn('checagem de escopo: arquivos alterados fora da área principal');
               this.session.log({ agent: this.role, event: 'scope-check', report });
               this.provider.addUser(report);
               continue;

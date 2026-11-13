@@ -6,6 +6,17 @@ function typeOf(v: unknown): string {
   return typeof v;
 }
 
+const WRAPPERS = ['parameters', 'arguments', 'input'];
+
+function parsed(v: unknown): unknown {
+  if (typeof v !== 'string') return v;
+  try {
+    return JSON.parse(v);
+  } catch {
+    return v;
+  }
+}
+
 export type Validation = { error: string | null; ignored: string[] };
 
 export function validateInput(spec: ToolSpec, input: unknown): Validation {
@@ -13,6 +24,11 @@ export function validateInput(spec: ToolSpec, input: unknown): Validation {
   const fail = (error: string): Validation => ({ error, ignored });
   if (typeOf(input) !== 'object') return fail('arguments must be a JSON object');
   const obj = input as Input;
+  const wrapped = WRAPPERS.map((k) => parsed(obj[k])).find((v): v is Input => typeOf(v) === 'object' && spec.schema.required.every((r) => (v as Input)[r] !== undefined));
+  if (wrapped && spec.schema.required.some((r) => obj[r] === undefined)) {
+    for (const key of Object.keys(obj)) delete obj[key];
+    Object.assign(obj, wrapped);
+  }
   for (const key of spec.schema.required) {
     if (obj[key] === undefined) return fail(`missing required field "${key}"`);
   }

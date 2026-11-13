@@ -1000,3 +1000,39 @@ test('a read announced while the model streams starts right away and runs only o
   assert.equal(reads.length, 1, 'the early read must not run again');
   assert.match(results[0]![0]!.output, /hello/);
 });
+
+test('validateInput unwraps arguments the model nested under parameters/arguments', () => {
+  const bash = allTools.find((t) => t.name === 'bash')!;
+  const nested: Record<string, unknown> = { default_api: 'bash', parameters: '{"command":"ls"}' };
+  assert.equal(validateInput(bash, nested).error, null);
+  assert.deepEqual(nested, { command: 'ls' });
+  const object: Record<string, unknown> = { arguments: { command: 'pwd' } };
+  assert.equal(validateInput(bash, object).error, null);
+  assert.equal(object.command, 'pwd');
+  assert.match(validateInput(bash, { path: 'a.ts', limit: 10 }).error!, /missing required field "command"/);
+});
+
+test('scope check covers files edited in earlier messages of the same conversation', async () => {
+  const root = workspace();
+  execFileSync('git', ['init', '-q'], { cwd: root });
+  const ui = UI.create();
+  const provider = new ScriptedProvider([
+    () => call('write_file', { path: 'api/a.ts', content: 'export const a = 1;\n' }),
+    () => call('write_file', { path: 'api/b.ts', content: 'export const b = 1;\n' }),
+    () => call('write_file', { path: 'web/x.ts', content: 'export const x = 1;\n' }),
+    () => answer('verificado'),
+    ({ user }) => {
+      assert.match(user.at(-1)!, /check the files outside it:\n- web\/x\.ts/);
+      return answer('mantido: a tela quebra sem ele');
+    },
+  ]);
+  try {
+    const session = new Session(config(root, { maxSteps: 3 }), ui, () => provider);
+    await session.run('ajuste a api');
+    process.env.ALIEN_SKIP_END = 'verify,requirements';
+    assert.equal(await session.run('pode continuar'), 'mantido: a tela quebra sem ele');
+  } finally {
+    delete process.env.ALIEN_SKIP_END;
+    ui.close();
+  }
+});
