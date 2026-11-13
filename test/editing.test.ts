@@ -50,6 +50,7 @@ test('a near miss explains what is closest instead of failing silently', () => {
 test('syntax check accepts valid code and reports the broken line', async () => {
   assert.equal(await syntaxError('a.ts', 'const x: number = 1;\n'), null);
   assert.match((await syntaxError('a.ts', 'const x = ;\n'))!, /line 1/);
+  assert.equal(await syntaxError('c.controller.ts', "@Controller('d')\nexport class C {\n  list(@CurrentOperator() id: string) {\n    return id;\n  }\n}\n"), null);
   assert.match((await syntaxError('a.json', '{"a":1,}'))!, /trailing commas/);
   assert.equal(await syntaxError('notes.md', '# anything'), null);
 });

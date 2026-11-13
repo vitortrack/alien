@@ -28,7 +28,7 @@ export async function syntaxError(file: string, content: string): Promise<string
     const esbuild = await import('esbuild').catch(() => null);
     if (!esbuild) return null;
     try {
-      await esbuild.transform(content, { loader, sourcefile: path.basename(file) });
+      await esbuild.transform(content, { loader, sourcefile: path.basename(file), tsconfigRaw: { compilerOptions: { experimentalDecorators: true } } });
       return null;
     } catch (e) {
       const errors = (e as { errors?: EsbuildError[] }).errors ?? [];
