@@ -90,9 +90,8 @@ class WebviewUI implements AgentUI {
 
 function readConfig(root: string): Config {
   const c = vscode.workspace.getConfiguration('alien');
-  const hasKey = Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
   const chosen = c.get<string>('provider', 'auto');
-  const provider: ProviderName = chosen === 'ollama' || chosen === 'anthropic' ? chosen : hasKey ? 'anthropic' : 'ollama';
+  const provider: ProviderName = chosen === 'ollama' || chosen === 'anthropic' ? chosen : hasAnthropicKey() ? 'anthropic' : 'ollama';
   process.env.OLLAMA_HOST = c.get<string>('ollamaHost', 'http://localhost:11434');
   return {
     provider,
@@ -139,14 +138,17 @@ async function hasVision(model: string): Promise<boolean> {
   }
 }
 
+const CLAUDE_MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'];
+const hasAnthropicKey = (): boolean => Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
+
 async function localModels(current: string): Promise<string[]> {
   try {
     const res = await fetch(`${process.env.OLLAMA_HOST}/api/tags`);
     const body = (await res.json()) as { models?: { name: string; details?: { family?: string } }[] };
     const names = (body.models ?? []).filter((m) => !/embed/i.test(m.name) && !/bert/i.test(m.details?.family ?? '')).map((m) => m.name);
-    return [...new Set([current, ...names])].sort();
+    return [...new Set([current, ...names, ...CLAUDE_MODELS])].sort();
   } catch {
-    return [current];
+    return [...new Set([current, ...CLAUDE_MODELS])].sort();
   }
 }
 
@@ -297,7 +299,13 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
   private async setEngine(engine: Engine): Promise<void> {
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!root || this.session?.busy) return;
-    await vscode.workspace.getConfiguration('alien').update('engine', engine, vscode.ConfigurationTarget.Global);
+    const config = vscode.workspace.getConfiguration('alien');
+    await config.update('engine', engine, vscode.ConfigurationTarget.Global);
+    if (engine === 'alien' && readConfig(root).provider === 'anthropic' && !hasAnthropicKey()) {
+      await config.update('provider', 'ollama', vscode.ConfigurationTarget.Global);
+      await config.update('model', DEFAULT_MODEL.ollama, vscode.ConfigurationTarget.Global);
+      this.post({ type: 'models', models: await localModels(DEFAULT_MODEL.ollama), current: DEFAULT_MODEL.ollama });
+    }
     if (this.session) this.ensureSession();
     this.post({ type: 'status', text: statusText(readConfig(root)) });
   }
@@ -306,7 +314,12 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!model || !root || this.session?.busy) return;
     const config = vscode.workspace.getConfiguration('alien');
-    if (readConfig(root).provider !== 'ollama') await config.update('provider', 'ollama', vscode.ConfigurationTarget.Global);
+    const provider: ProviderName = CLAUDE_MODELS.includes(model) ? 'anthropic' : 'ollama';
+    if (readConfig(root).provider !== provider) await config.update('provider', provider, vscode.ConfigurationTarget.Global);
+    if (provider === 'anthropic' && !hasAnthropicKey() && readConfig(root).engine === 'alien') {
+      await config.update('engine', 'sdk', vscode.ConfigurationTarget.Global);
+      this.post({ type: 'engine', current: 'sdk' });
+    }
     await config.update('model', model, vscode.ConfigurationTarget.Global);
     if (this.session) this.ensureSession();
     const cfg = readConfig(root);
