@@ -12,6 +12,7 @@
   const best3 = $('best3');
   const working = $('working');
   const modelSel = $('model');
+  const engineSel = $('engine');
   const fileInput = $('file');
   const attachBtn = $('attach');
   const attachEl = $('attachments');
@@ -332,6 +333,7 @@
   function setBusy(busy) {
     stopBtn.hidden = !busy;
     modelSel.disabled = busy;
+    engineSel.disabled = busy;
     if (busy) startWork();
     else finishWork('stopped');
   }
@@ -433,6 +435,9 @@
       }
       case 'status':
         statusEl.textContent = m.text;
+        break;
+      case 'engine':
+        engineSel.value = m.current === 'alien' ? 'alien' : 'sdk';
         break;
       case 'models':
         modelSel.innerHTML = m.models.map((name) => `<option value="${esc(name)}"${name === m.current ? ' selected' : ''}>${esc(name)}</option>`).join('');
@@ -551,6 +556,7 @@
     attach(e.dataTransfer?.files ?? []);
   });
   modelSel.addEventListener('change', () => vscode.postMessage({ type: 'setModel', model: modelSel.value }));
+  engineSel.addEventListener('change', () => vscode.postMessage({ type: 'setEngine', engine: engineSel.value }));
   messages.addEventListener('click', (e) => {
     const ref = e.target.closest('a.ref');
     if (!ref) return;

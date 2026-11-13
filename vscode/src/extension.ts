@@ -114,6 +114,8 @@ function readConfig(root: string): Config {
 
 const OPEN_SESSION = 'alien.openSession';
 
+const statusText = (cfg: Config): string => `${cfg.provider} · ${cfg.model} · ${cfg.mode} · motor ${cfg.engine === 'alien' ? 'Alien' : 'Agent SDK'}`;
+
 type Attachment = { name: string; mime: string; data: string };
 
 function saveAttachments(root: string, list: Attachment[]): { lines: string[]; images: Image[] } {
@@ -205,6 +207,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
     <label class="toggle"><input type="checkbox" id="orchestrate"> multiagente</label>
     <label class="toggle" title="Roda 3 tentativas isoladas e aplica a que passa nos testes com o menor diff (3× mais tokens)"><input type="checkbox" id="best3"> melhor de 3</label>
     <span class="spacer"></span>
+    <select id="engine" title="Motor do agente: Agent SDK ou o laço próprio do Alien" aria-label="Motor"><option value="sdk">Agent SDK</option><option value="alien">Alien</option></select>
     <select id="model" title="Modelo do Ollama (lista os modelos instalados nesta máquina)" aria-label="Modelo"></select>
     <button type="button" id="stop" hidden>Parar</button>
     <button type="submit" id="send">Enviar</button>
@@ -241,7 +244,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
     }
     const cfg = readConfig(root);
     const current = this.session?.cfg;
-    if (!this.session || current?.root !== root || current.provider !== cfg.provider || current.model !== cfg.model || current.embedModel !== cfg.embedModel) {
+    if (!this.session || current?.root !== root || current.provider !== cfg.provider || current.model !== cfg.model || current.engine !== cfg.engine || current.embedModel !== cfg.embedModel) {
       const previous = this.session;
       this.session = new Session(cfg, new WebviewUI(this.post, this.pending));
       if (previous?.turns.length && current?.root === root && current.provider === cfg.provider) {
@@ -263,8 +266,9 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
         const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         if (root) {
           const cfg = readConfig(root);
-          this.post({ type: 'status', text: `${cfg.provider} · ${cfg.model} · ${cfg.mode}` });
+          this.post({ type: 'status', text: statusText(cfg) });
           this.post({ type: 'models', models: await localModels(cfg.model), current: cfg.model });
+          this.post({ type: 'engine', current: cfg.engine });
           this.post({ type: 'skills', skills: findSkills(root).map(({ name, description }) => ({ name, description })) });
           this.restore(root);
         }
@@ -272,6 +276,8 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
       }
       case 'setModel':
         return this.setModel(String(m.model ?? ''));
+      case 'setEngine':
+        return this.setEngine(m.engine === 'alien' ? 'alien' : 'sdk');
       case 'send':
         return this.send(String(m.text ?? ''), m.orchestrate === true, m.best3 === true, Array.isArray(m.attachments) ? (m.attachments as Attachment[]) : []);
       case 'stop':
@@ -288,6 +294,14 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  private async setEngine(engine: Engine): Promise<void> {
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!root || this.session?.busy) return;
+    await vscode.workspace.getConfiguration('alien').update('engine', engine, vscode.ConfigurationTarget.Global);
+    if (this.session) this.ensureSession();
+    this.post({ type: 'status', text: statusText(readConfig(root)) });
+  }
+
   private async setModel(model: string): Promise<void> {
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!model || !root || this.session?.busy) return;
@@ -296,7 +310,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
     await config.update('model', model, vscode.ConfigurationTarget.Global);
     if (this.session) this.ensureSession();
     const cfg = readConfig(root);
-    this.post({ type: 'status', text: `${cfg.provider} · ${cfg.model} · ${cfg.mode}` });
+    this.post({ type: 'status', text: statusText(cfg) });
   }
 
   private async send(text: string, viaOrchestrator: boolean, best3: boolean, attachments: Attachment[]): Promise<void> {
@@ -319,7 +333,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
     if (images.length && session.cfg.provider === 'ollama' && !(await hasVision(session.cfg.model))) {
       this.post({ type: 'warn', message: `O modelo ${session.cfg.model} não lê imagens: ele recebe só o caminho do arquivo. Para interpretar o print, escolha um modelo com visão no seletor (ex.: glm-5.3-flash:cloud).` });
     }
-    this.post({ type: 'status', text: `${session.cfg.provider} · ${session.cfg.model} · ${session.cfg.mode}` });
+    this.post({ type: 'status', text: statusText(session.cfg) });
     this.post({ type: 'busy', value: true });
     const start = { ...session.usage };
     const tokens = () => this.post({ type: 'tokens', input: session.usage.input - start.input, output: session.usage.output - start.output });
