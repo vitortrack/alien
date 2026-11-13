@@ -371,7 +371,7 @@ test('system prompt carries the chosen language and the answering method', () =>
   assert.match(systemPrompt('main', root, 'pt-BR'), /in Brazilian Portuguese: answers, the short notes between tool calls/);
   assert.match(systemPrompt('main', root, 'es'), /in Spanish/);
   assert.match(systemPrompt('main', root, 'auto'), /language the user wrote in/);
-  assert.match(systemPrompt('explorer', root, 'en'), /cite locations as path\/to\/file.ts:42/);
+  assert.match(systemPrompt('explorer', root, 'en'), /evidence as path\/to\/file.ts:42/);
 });
 
 test('no mid-run nudges: a long streak of reads gets plain tool outputs, with no focus, re-read, recap or budget notes', async () => {
