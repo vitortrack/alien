@@ -195,6 +195,7 @@
     append(el);
     working.innerHTML = `${ALIEN}<span class="verb"></span><span class="meta"></span>`;
     working.hidden = false;
+    working.classList.remove('idle');
     work = {
       el,
       body: el,
@@ -257,6 +258,8 @@
       w.text = null;
     }
   }
+
+  const thinkingNow = (on) => working.classList.toggle('idle', !on);
 
   function finishWork(state) {
     const w = work;
@@ -344,10 +347,12 @@
         break;
       case 'text':
         textDelta(m.delta);
+        thinkingNow(false);
         break;
       case 'thinking':
         if (m.delta) thinkingDelta(m.delta);
         else startWork();
+        thinkingNow(true);
         break;
       case 'tokens':
         if (work && m.input + m.output) work.tokens = ` · ↑ ${compact(m.input)} ↓ ${compact(m.output)} tokens`;
@@ -356,6 +361,7 @@
         const w = startWork();
         endThought();
         w.tools++;
+        thinkingNow(false);
         w.lastTool = add(`item tool${m.agent ? ' sub' : ''}`, `<div class="tool-head">${agentTag(m.agent)}<span class="tool-name">${esc(m.name)}</span> <span class="tool-args">${esc(m.args)}</span></div>`, w.body);
         break;
       }
@@ -367,6 +373,7 @@
         details.className = `obs ${m.ok ? 'ok' : 'fail'}${m.agent ? ' sub' : ''}`;
         details.innerHTML = `<summary>${m.ok ? '✓' : '✗'} ${first}${more}</summary><pre><code>${linkRefs(esc(m.output))}</code></pre>`;
         (work?.lastTool ?? target()).appendChild(details);
+        if (work) thinkingNow(true);
         scroll();
         break;
       }
@@ -393,6 +400,7 @@
       case 'confirm': {
         const w = startWork();
         endThought();
+        thinkingNow(false);
         const always = m.alwaysLabel ? `<button class="always secondary">Sempre: ${esc(m.alwaysLabel)}</button>` : '';
         const box = add(
           'item confirm',

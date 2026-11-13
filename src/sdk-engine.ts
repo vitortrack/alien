@@ -83,17 +83,29 @@ function blockText(content: unknown): string {
   return content.map((b: { type?: string; text?: string }) => (b.type === 'text' ? (b.text ?? '') : '')).join('\n');
 }
 
-export function show(message: SDKMessage, ui: AgentUI, children: Map<string, AgentUI>): void {
+export interface ShowState {
+  children: Map<string, AgentUI>;
+  streamed: boolean;
+}
+
+export function show(message: SDKMessage, ui: AgentUI, state: ShowState): void {
+  const { children } = state;
   const parent = 'parent_tool_use_id' in message ? message.parent_tool_use_id : null;
   let target = ui;
   if (parent) {
     if (!children.has(parent)) children.set(parent, ui.child(`subagente#${children.size + 1}`));
     target = children.get(parent)!;
   }
-  if (message.type === 'assistant') {
+  if (message.type === 'stream_event') {
+    const event = message.event;
+    if (event.type !== 'content_block_delta') return;
+    state.streamed = true;
+    if (event.delta.type === 'text_delta') target.text(event.delta.text);
+    else if (event.delta.type === 'thinking_delta') target.thinking(event.delta.thinking);
+  } else if (message.type === 'assistant') {
     for (const block of message.message.content) {
-      if (block.type === 'text') target.text(block.text);
-      else if (block.type === 'thinking') target.thinking(block.thinking);
+      if (block.type === 'text' && !state.streamed) target.text(block.text);
+      else if (block.type === 'thinking' && !state.streamed) target.thinking(block.thinking);
       else if (block.type === 'tool_use') target.tool(block.name, clip(JSON.stringify(block.input), 300));
     }
   } else if (message.type === 'user' && Array.isArray(message.message.content)) {
@@ -111,6 +123,7 @@ export async function runSdk(task: string, run: SdkRun, ui: AgentUI): Promise<Sd
     model: run.model,
     env: sdkEnv(run.provider, run.model),
     abortController: controller,
+    includePartialMessages: true,
     systemPrompt: { type: 'preset', preset: 'claude_code', append: `Always answer the user in ${languageName(run.lang)}.` },
     permissionMode: 'default',
     hooks: { PreToolUse: [{ hooks: [permissionHook(run, ui)] }] },
@@ -119,7 +132,7 @@ export async function runSdk(task: string, run: SdkRun, ui: AgentUI): Promise<Sd
     ...(run.tools ? { tools: [...new Set(run.tools.map((t) => t.replace(/\(.*$/, '')))], allowedTools: run.tools } : {}),
     ...(run.outputSchema ? { outputFormat: { type: 'json_schema' as const, schema: run.outputSchema as Record<string, unknown> } } : {}),
   };
-  const children = new Map<string, AgentUI>();
+  const state: ShowState = { children: new Map(), streamed: false };
   let sessionId: string | undefined = run.resume;
   const usage: Usage = { input: 0, output: 0 };
   let answer = '';
@@ -127,7 +140,7 @@ export async function runSdk(task: string, run: SdkRun, ui: AgentUI): Promise<Sd
   try {
     for await (const message of query({ prompt: task, options })) {
       if ('session_id' in message && message.session_id) sessionId = message.session_id;
-      show(message, ui, children);
+      show(message, ui, state);
       if (message.type === 'result') {
         const models = Object.values(message.modelUsage);
         usage.input = models.reduce((sum, m) => sum + m.inputTokens + m.cacheReadInputTokens + m.cacheCreationInputTokens, 0);

@@ -447,7 +447,8 @@ details.obs pre {
   color: var(--vscode-textLink-foreground);
 }
 
-#working[hidden] {
+#working[hidden],
+#working.idle {
   display: none;
 }
 
