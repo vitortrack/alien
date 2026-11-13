@@ -145,12 +145,13 @@ export async function runSdk(task: string, run: SdkRun, ui: AgentUI): Promise<Sd
         const models = Object.values(message.modelUsage);
         usage.input = models.reduce((sum, m) => sum + m.inputTokens + m.cacheReadInputTokens + m.cacheCreationInputTokens, 0);
         usage.output = models.reduce((sum, m) => sum + m.outputTokens, 0);
-        answer = message.subtype === 'success' ? message.result : `Limite ou erro do Agent SDK (${message.subtype}): ${message.errors.join('; ')}`;
+        answer = message.subtype === 'success' ? message.result : message.subtype === 'error_max_turns' ? `Limite de ${run.maxSteps} passos atingido antes de concluir.` : `Erro do Agent SDK (${message.subtype}): ${message.errors.join('; ')}`;
         if (message.subtype === 'success') structured = message.structured_output;
       }
     }
   } catch (e) {
     if (run.signal.aborted) return { answer: 'Interrompido pelo usuário.', sessionId, usage };
+    if (answer) return { answer, sessionId, usage, structured };
     throw e;
   }
   return { answer, sessionId, usage, structured };
