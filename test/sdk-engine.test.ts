@@ -1,0 +1,31 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { judgeTool, sdkEnv } from '../src/sdk-engine.js';
+
+test('sdk engine: ollama points the Agent SDK at the local Anthropic-compatible endpoint with the chosen model everywhere', () => {
+  const env = sdkEnv('ollama', 'glm-5.3-flash:cloud', { PATH: '/bin', OLLAMA_HOST: 'http://h:1' });
+  assert.equal(env.PATH, '/bin');
+  assert.equal(env.ANTHROPIC_BASE_URL, 'http://h:1');
+  assert.equal(env.ANTHROPIC_API_KEY, '');
+  assert.equal(env.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'glm-5.3-flash:cloud');
+  assert.equal(env.CLAUDE_CODE_SUBAGENT_MODEL, 'glm-5.3-flash:cloud');
+  assert.deepEqual(sdkEnv('anthropic', 'claude-opus-5-5', { PATH: '/bin' }), { PATH: '/bin' });
+});
+
+test('sdk engine: reads pass, writes follow the mode, secrets and destructive commands always ask', () => {
+  const none = new Set<string>();
+  assert.deepEqual(judgeTool('Read', { file_path: 'a.ts' }, 'ask', none), { allow: true });
+  assert.deepEqual(judgeTool('Bash', { command: 'git status' }, 'read-only', none), { allow: true });
+  assert.equal(judgeTool('Edit', { file_path: 'a.ts' }, 'auto', none).hasOwnProperty('allow'), true);
+  assert.match((judgeTool('Write', { file_path: 'a.ts' }, 'read-only', none) as { reason: string }).reason, /read-only mode/);
+  assert.equal((judgeTool('Edit', { file_path: 'a.ts' }, 'ask', none) as { key: string }).key, 'files');
+  assert.deepEqual(judgeTool('Edit', { file_path: 'a.ts' }, 'ask', new Set(['files'])), { allow: true });
+  const secret = judgeTool('Read', { file_path: 'api/.env' }, 'auto', none) as { ask: string; secret: boolean; key: null };
+  assert.equal(secret.secret, true);
+  assert.equal(secret.key, null);
+  assert.deepEqual(judgeTool('Read', { file_path: 'api/.env.example' }, 'auto', none), { allow: true });
+  assert.equal(judgeTool('Bash', { command: 'sudo rm -rf /' }, 'auto', none).hasOwnProperty('ask'), true);
+  assert.match((judgeTool('mcp__detro-db__executar', { sql: 'delete from x' }, 'read-only', none) as { reason: string }).reason, /read-only mode/);
+  assert.equal((judgeTool('mcp__detro-db__executar', {}, 'ask', none) as { key: string }).key, 'mcp__detro-db__executar');
+  assert.equal(judgeTool('Bash', { command: 'docker inspect api | grep env' }, 'auto', new Set(['bash:docker'])).hasOwnProperty('ask'), true);
+});

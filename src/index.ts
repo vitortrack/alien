@@ -23,6 +23,7 @@ Opções:
   -p, --provider <ollama|anthropic>  padrão: anthropic com ANTHROPIC_API_KEY, senão ollama
   -m, --model <nome>                 padrão: ${DEFAULT_MODEL.ollama} (ollama) · ${DEFAULT_MODEL.anthropic} (anthropic)
       --mode <ask|auto|read-only>    permissão para escrita e bash (padrão: ask)
+      --engine <alien|sdk>           motor do agente: o laço próprio do Alien ou o Claude Agent SDK (padrão: sdk)
   -C, --cwd <dir>                    pasta de trabalho (padrão: a atual)
       --orchestrate                  contrato → fatias com portão → revisão
       --gate                         o próprio modelo escreve checagens de pronto (uma chamada, sem explorar o repo); o agente só conclui quando passam
@@ -45,7 +46,7 @@ Opções:
       --fork                         com -c ou -r: continua numa cópia, sem alterar a original
   -h, --help
 
-Variáveis: OLLAMA_HOST, ANTHROPIC_API_KEY, ALIEN_MODEL, ALIEN_EMBED_MODEL, ALIEN_LANG`;
+Variáveis: OLLAMA_HOST, ANTHROPIC_API_KEY, ALIEN_MODEL, ALIEN_ENGINE, ALIEN_EMBED_MODEL, ALIEN_LANG`;
 
 const COMMANDS = `Comandos:
   /plan                    mostra o plano atual
@@ -100,6 +101,7 @@ function parseConfig(): { cfg: Config; task: string; orchestrateTask: boolean; g
         provider: { type: 'string', short: 'p' },
         model: { type: 'string', short: 'm' },
         mode: { type: 'string' },
+        engine: { type: 'string' },
         cwd: { type: 'string', short: 'C' },
         orchestrate: { type: 'boolean' },
         attempts: { type: 'string' },
@@ -140,6 +142,7 @@ function parseConfig(): { cfg: Config; task: string; orchestrateTask: boolean; g
       provider,
       model: values.model ?? process.env.ALIEN_MODEL ?? DEFAULT_MODEL[provider],
       mode: oneOf(values.mode, ['ask', 'auto', 'read-only'] as const, '--mode', 'ask'),
+      engine: oneOf(values.engine ?? process.env.ALIEN_ENGINE, ['alien', 'sdk'] as const, '--engine', 'sdk'),
       root,
       maxSteps: positiveInt(values['max-steps'], '--max-steps', 80),
       review: Boolean(values.review) && !values['no-review'],

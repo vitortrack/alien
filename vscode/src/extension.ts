@@ -5,7 +5,7 @@ import * as vscode from 'vscode';
 import type { AgentUI } from '../../src/agent-ui.js';
 import { bestOf } from '../../src/attempts.js';
 import { orchestrate } from '../../src/orchestrator.js';
-import { DEFAULT_EMBED_MODEL, DEFAULT_MODEL, Session, type Config, type ProviderName } from '../../src/session.js';
+import { DEFAULT_EMBED_MODEL, DEFAULT_MODEL, Session, type Config, type Engine, type ProviderName } from '../../src/session.js';
 import { SessionStore } from '../../src/sessions.js';
 import { findSkills, skillCommand } from '../../src/skills.js';
 import { THINKING_WORDS } from '../../src/thinking-words.js';
@@ -98,6 +98,7 @@ function readConfig(root: string): Config {
     provider,
     model: c.get<string>('model', '') || DEFAULT_MODEL[provider],
     mode: c.get<Mode>('mode', 'ask'),
+    engine: c.get<Engine>('engine', 'sdk'),
     root,
     maxSteps: c.get<number>('maxSteps', 0),
     review: c.get<boolean>('review', false),
