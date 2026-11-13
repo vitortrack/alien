@@ -280,7 +280,6 @@
     if (!w.think) {
       const el = document.createElement('details');
       el.className = 'item thinking live';
-      el.open = true;
       el.innerHTML = '<summary><span class="label">Pensando…</span><span class="count"></span></summary><div class="think-body"></div>';
       w.el.appendChild(el);
       w.think = { el, label: el.querySelector('.label'), count: el.querySelector('.count'), chars: 0, started: Date.now(), typer: typer(el.querySelector('.think-body'), markdown) };
