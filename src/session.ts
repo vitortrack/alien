@@ -84,6 +84,7 @@ export class Session {
   readonly sessions: SessionStore;
   id = newSessionId();
   turns: Turn[] = [];
+  readonly testOriginals = new Map<string, string | null>();
   private created = new Date().toISOString();
   reviewing: Promise<void> = Promise.resolve();
   private queued: string[] = [];
@@ -133,7 +134,7 @@ export class Session {
         return session.signal;
       },
       testEditsAllowed: allowsTestEdits(task),
-      testOriginals: new Map(),
+      testOriginals: session.testOriginals,
       codeIndex: session.codeIndex,
       memory: session.memory,
       skills: session.skills,
@@ -316,5 +317,6 @@ export class Session {
     this.id = newSessionId();
     this.created = new Date().toISOString();
     this.turns = [];
+    this.testOriginals.clear();
   }
 }

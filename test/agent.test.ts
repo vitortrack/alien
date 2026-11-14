@@ -532,6 +532,33 @@ test('with reviewModel set, the review runs on that Claude model through the Age
   assert.match(calls[0]!.task, /independent reviewer[\s\S]*<evaluation>PASS, NEEDS_IMPROVEMENT, or FAIL[\s\S]*escreva v2 em a\.txt/);
 });
 
+test('a test the agent wrote in an earlier message of the conversation stays editable in a later one', async () => {
+  const root = workspace();
+  const results: string[] = [];
+  const main = new ScriptedProvider([
+    () => call('write_file', { path: 'tests/a.spec.js', content: "import assert from 'node:assert/strict';\nassert.equal(soma(1, 1), 3);\n" }),
+    () => call('bash', { command: 'node -e 1' }),
+    () => answer('escrevi o teste'),
+    () => answer('escrevi o teste'),
+    () => call('edit_file', { path: 'tests/a.spec.js', old_string: 'soma(1, 1), 3)', new_string: 'soma(1, 1), 2)' }),
+    ({ results: r }) => {
+      results.push(r.at(-1)![0]!.output);
+      return answer('corrigi');
+    },
+    () => answer('corrigi'),
+    () => answer('corrigi'),
+  ]);
+  const ui = UI.create();
+  const session = new Session(config(root, { mode: 'auto' }), ui, () => main);
+  try {
+    assert.equal(await session.run('implemente soma com TDD'), 'escrevi o teste');
+    await session.run('pode continuar');
+  } finally {
+    ui.close();
+  }
+  assert.match(results[0]!, /Edited tests\/a\.spec\.js/);
+});
+
 test('verification gate asks once to run something after unverified code edits', async () => {
   const root = workspace();
   const ui = UI.create();
