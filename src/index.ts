@@ -143,7 +143,7 @@ function parseConfig(): { cfg: Config; task: string; orchestrateTask: boolean; g
       provider,
       model: values.model ?? process.env.ALIEN_MODEL ?? DEFAULT_MODEL[provider],
       mode: oneOf(values.mode, ['ask', 'auto', 'read-only'] as const, '--mode', 'ask'),
-      engine: oneOf(values.engine ?? process.env.ALIEN_ENGINE, ['alien', 'sdk'] as const, '--engine', 'sdk'),
+      engine: oneOf(values.engine ?? process.env.ALIEN_ENGINE, ['alien', 'sdk'] as const, '--engine', 'alien'),
       root,
       maxSteps: positiveInt(values['max-steps'], '--max-steps', 80),
       reviewModel: values['review-model'] ?? process.env.ALIEN_REVIEW_MODEL,

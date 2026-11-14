@@ -512,24 +512,26 @@ test('on a follow-up like "pode continuar", the reviewer and the requirements ch
   assert.match(goals[0]!, /escreva a = 2 em src\/a\.js/);
 });
 
-test('with reviewModel set, the review runs on that Claude model through the Agent SDK, read-only, with the reviewer instructions', async () => {
+test('with reviewModel set, the review runs in the Alien engine as a critic on that model, without the Agent SDK', async () => {
   const root = workspace();
   const main = new ScriptedProvider([() => call('write_file', { path: 'a.txt', content: 'v2' }), () => answer('feito'), () => answer('feito')]);
+  const asked: (string | undefined)[] = [];
+  const critic = new ScriptedProvider([({ system }) => {
+    assert.match(system, /independent reviewer/);
+    return answer('<evaluation>PASS</evaluation>\n<feedback></feedback>');
+  }]);
   const ui = UI.create();
-  const session = new Session(config(root, { review: true, reviewModel: 'claude-opus-5-5' }), ui, () => main);
-  const calls: { task: string; extra: Record<string, unknown> }[] = [];
-  session.viaSdk = async (task, _ui, extra = {}) => {
-    calls.push({ task, extra });
-    return { answer: '<evaluation>PASS</evaluation>\n<feedback></feedback>', sessionId: 's', usage: { input: 0, output: 0 } } as Awaited<ReturnType<Session['viaSdk']>>;
-  };
+  const session = new Session(config(root, { review: true, reviewModel: 'minimax-m3.1-flash:cloud' }), ui, (model) => {
+    asked.push(model);
+    return model ? critic : main;
+  });
+  session.viaSdk = async () => assert.fail('the review must not use the Agent SDK');
   try {
     assert.equal(await session.run('escreva v2 em a.txt'), 'feito');
   } finally {
     ui.close();
   }
-  assert.equal(calls.length, 1);
-  assert.deepEqual([calls[0]!.extra.role, calls[0]!.extra.provider, calls[0]!.extra.model], ['critic', 'anthropic', 'claude-opus-5-5']);
-  assert.match(calls[0]!.task, /independent reviewer[\s\S]*<evaluation>PASS, NEEDS_IMPROVEMENT, or FAIL[\s\S]*escreva v2 em a\.txt/);
+  assert.deepEqual(asked.filter(Boolean), ['minimax-m3.1-flash:cloud']);
 });
 
 test('a test the agent wrote in an earlier message of the conversation stays editable in a later one', async () => {

@@ -2,7 +2,7 @@
   "name": "alien",
   "displayName": "Alien — Agente de Código",
   "description": "Agente de código autônomo em formato de chat: ReAct, planejamento, revisão independente, multiagente, RAG e memória — local com Ollama ou com Claude.",
-  "version": "0.1.26",
+  "version": "0.1.27",
   "publisher": "vitortrack",
   "license": "MIT",
   "repository": {
@@ -98,7 +98,7 @@
             "alien",
             "sdk"
           ],
-          "default": "sdk",
+          "default": "alien",
           "enumDescriptions": [
             "Laço próprio do Alien (ferramentas, poda e compactação do Alien)",
             "Claude Agent SDK (ferramentas, compactação, subagentes, skills e CLAUDE.md do projeto), rodando com o modelo escolhido — Ollama ou Claude"
@@ -118,7 +118,7 @@
         "alien.reviewModel": {
           "type": "string",
           "default": "",
-          "description": "Modelo Claude que revisa o trabalho ao final (ex.: claude-opus-5-5), pelo motor Agent SDK, só leitura. Preenchido, liga a revisão; a tarefa continua no modelo escolhido no chat."
+          "description": "Modelo que revisa o trabalho ao final, como agente crítico do motor Alien, só leitura (ex.: um modelo maior do Ollama; claude-* exige ANTHROPIC_API_KEY). Preenchido, liga a revisão; a tarefa continua no modelo escolhido no chat."
         },
         "alien.maxSteps": {
           "type": "number",

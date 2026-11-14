@@ -97,7 +97,7 @@ function readConfig(root: string): Config {
     provider,
     model: c.get<string>('model', '') || DEFAULT_MODEL[provider],
     mode: c.get<Mode>('mode', 'ask'),
-    engine: c.get<Engine>('engine', 'sdk'),
+    engine: c.get<Engine>('engine', 'alien'),
     root,
     maxSteps: c.get<number>('maxSteps', 0),
     reviewModel: c.get<string>('reviewModel', '') || undefined,

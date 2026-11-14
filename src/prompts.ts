@@ -76,8 +76,6 @@ What needs improvement and why: a numbered list of file:line, what is wrong, how
 PASS when no problem with confidence ≥ 80 remains; FAIL when the approach itself is wrong and must be redone.`,
 };
 
-export const CRITIC_INSTRUCTIONS = ROLE.critic;
-
 export const LANGUAGE_NAMES: Record<string, string> = {
   'pt-BR': 'Brazilian Portuguese',
   pt: 'Portuguese',

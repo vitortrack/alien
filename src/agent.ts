@@ -79,8 +79,9 @@ export class Agent {
     private readonly session: Session,
     readonly role: Role,
     private readonly ui: AgentUI,
+    model?: string,
   ) {
-    this.provider = session.newProvider();
+    this.provider = session.newProvider(model);
     const only = session.cfg.tools;
     const lean = role === 'main' && session.cfg.provider === 'anthropic';
     const available = allTools.filter((t) => ROLE_TOOLS[role](t) && !(lean && BASH_COVERS.includes(t.name)) && (!only || only.includes(t.name)) && (t.name !== 'skill' || session.skills.length > 0));

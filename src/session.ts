@@ -5,7 +5,7 @@ import type { Criterion } from './contract.js';
 import { MemoryStore } from './memory.js';
 import { findSkills, type Skill } from './skills.js';
 import { reviewSkills, type ReviewInput } from './skill-review.js';
-import { CRITIC_INSTRUCTIONS, type Role } from './prompts.js';
+import type { Role } from './prompts.js';
 import { AnthropicProvider, type Effort } from './providers/anthropic.js';
 import { alienHome } from './paths.js';
 import { OllamaProvider } from './providers/ollama.js';
@@ -56,7 +56,7 @@ const PRICE_PER_MTOK: Record<string, [number, number]> = {
   'claude-haiku-5-5': [0.1, 0.5],
 };
 
-export type ProviderFactory = () => Provider;
+export type ProviderFactory = (model?: string) => Provider;
 
 export interface Verdict {
   approved: boolean;
@@ -64,8 +64,11 @@ export interface Verdict {
 }
 
 function defaultFactory(cfg: Config): ProviderFactory {
-  if (cfg.provider === 'anthropic') return () => new AnthropicProvider(cfg.model, cfg.effort);
-  return () => new OllamaProvider(cfg.model, cfg.numCtx);
+  return (model) => {
+    const name = model ?? cfg.model;
+    const anthropic = model ? name.startsWith('claude-') : cfg.provider === 'anthropic';
+    return anthropic ? new AnthropicProvider(name, cfg.effort) : new OllamaProvider(name, cfg.numCtx);
+  };
 }
 
 export class Session {
@@ -119,8 +122,8 @@ export class Session {
     return this.logFile;
   }
 
-  newProvider(): Provider {
-    return this.makeProvider();
+  newProvider(model?: string): Provider {
+    return this.makeProvider(model);
   }
 
   context(ui: AgentUI, files: Map<string, number> = new Map(), task = ''): ToolContext {
@@ -173,7 +176,7 @@ export class Session {
     fs.appendFileSync(this.logFile, `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`);
   }
 
-  async viaSdk(task: string, ui: AgentUI, extra: Partial<Pick<SdkRun, 'resume' | 'tools' | 'outputSchema' | 'provider' | 'model'>> & { role?: Role } = {}): Promise<SdkResult> {
+  async viaSdk(task: string, ui: AgentUI, extra: Pick<SdkRun, 'resume' | 'tools' | 'outputSchema'> & { role?: Role } = {}): Promise<SdkResult> {
     const { role, ...rest } = extra;
     const readOnly = role === 'explorer' || role === 'critic';
     const run: SdkRun = {
@@ -193,10 +196,10 @@ export class Session {
     return result;
   }
 
-  async spawn(role: Role, task: string, parent: AgentUI = this.ui): Promise<string> {
+  async spawn(role: Role, task: string, parent: AgentUI = this.ui, model?: string): Promise<string> {
     const ui = parent.child(`${role}#${++this.spawned}`);
     ui.info(`início: ${clip(task.replace(/\s+/g, ' '), 140)}`);
-    const report = this.cfg.engine === 'sdk' ? (await this.viaSdk(task, ui, { role })).answer : await new Agent(this, role, ui).run(task);
+    const report = this.cfg.engine === 'sdk' ? (await this.viaSdk(task, ui, { role })).answer : await new Agent(this, role, ui, model).run(task);
     ui.info(`fim: ${clip(report.replace(/\s+/g, ' '), 240)}`);
     return report;
   }
@@ -207,10 +210,7 @@ export class Session {
       ? `The current changes (git diff HEAD plus the full content of new files) are below, so you do not need to run git diff or re-read the new files. Read surrounding code only where you need it, then verify.\n\`\`\`diff\n${diff}\n\`\`\``
       : 'Start with git status and git diff (including untracked files), then inspect and verify.';
     const task = `The user asked for:\n${goal}\n\nAnother agent says it is done. You get no explanation from it on purpose: judge only the request and the actual changes. ${evidence}`;
-    const model = this.cfg.reviewModel;
-    const feedback = model
-      ? (await this.viaSdk(`${CRITIC_INSTRUCTIONS}\n\n${task}`, parent.child(`critic#${++this.spawned} ${model}`), { role: 'critic', provider: 'anthropic', model })).answer
-      : await this.spawn('critic', task, parent);
+    const feedback = await this.spawn('critic', task, parent, this.cfg.reviewModel);
     const verdict = /<evaluation>\s*(\w+)\s*<\/evaluation>/.exec(feedback)?.[1];
     return { approved: verdict === 'PASS', feedback: /<feedback>([\s\S]*?)<\/feedback>/.exec(feedback)?.[1]?.trim() || feedback };
   }
