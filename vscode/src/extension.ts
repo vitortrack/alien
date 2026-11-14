@@ -100,7 +100,8 @@ function readConfig(root: string): Config {
     engine: c.get<Engine>('engine', 'sdk'),
     root,
     maxSteps: c.get<number>('maxSteps', 0),
-    review: c.get<boolean>('review', false),
+    reviewModel: c.get<string>('reviewModel', '') || undefined,
+    review: c.get<boolean>('review', false) || Boolean(c.get<string>('reviewModel', '')),
     effort: 'high',
     numCtx: 65536,
     embedModel: c.get<string>('embedModel', DEFAULT_EMBED_MODEL),
@@ -256,7 +257,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
         for (const name of previous.activeSkills) this.session.activeSkills.add(name);
       }
     } else {
-      Object.assign(this.session.cfg, { mode: cfg.mode, lang: cfg.lang, review: cfg.review, maxSteps: cfg.maxSteps });
+      Object.assign(this.session.cfg, { mode: cfg.mode, lang: cfg.lang, review: cfg.review, reviewModel: cfg.reviewModel, maxSteps: cfg.maxSteps });
     }
     return this.session;
   }

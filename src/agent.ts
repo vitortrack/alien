@@ -161,6 +161,7 @@ export class Agent {
     this.verifiedSinceEdit = true;
     this.provider.addUser(await this.withRecall(task, this.opening(task)), images);
     const gated = this.role === 'main' && Boolean(cfg.gate?.length);
+    const request = this.role === 'main' ? [...this.session.turns.map((t) => t.task), task].join('\n\n') : task;
     this.session.log({ agent: this.role, event: 'task', task });
     const skip = skippedEndSteps();
     let reviews = 0;
@@ -231,14 +232,14 @@ export class Agent {
             requirementsChecked = true;
             this.ui.info('requisitos: conferindo cada item do pedido antes de concluir');
             this.session.log({ agent: this.role, event: 'requirements-check' });
-            this.provider.addUser(REQUIREMENTS_NUDGE(task));
+            this.provider.addUser(REQUIREMENTS_NUDGE(request));
             continue;
           }
           const diff = this.role === 'main' && this.changed ? await workspaceDiff(cfg.root) : null;
           const unchangedSinceApproval = diff !== null && diff === approvedDiff;
           if (this.role === 'main' && !skip.has('review') && cfg.review && this.changed && reviews < MAX_REVIEWS && !unchangedSinceApproval) {
             reviews++;
-            const verdict = await this.session.review(task, this.ui);
+            const verdict = await this.session.review(request, this.ui);
             if (!verdict.approved) {
               this.ui.warn('o revisor pediu correções');
               this.provider.addUser(

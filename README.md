@@ -171,6 +171,7 @@ alien -p anthropic --effort xhigh "investigue o vazamento de memória"
 | `--harness <arquivo>` | texto de harness específico da tarefa (RHI), posto antes do pedido |
 | `--handoff <arquivo>` | lê a nota da execução anterior no início e grava a nota desta no fim |
 | `--attempts <n>` | melhor de N: tentativas isoladas, fica a que passa nos testes com o menor diff |
+| `--review-model <modelo>` | a revisão roda num modelo Claude (ex.: `claude-opus-5-5`) pelo Agent SDK, só leitura, e já liga a revisão; a tarefa continua no modelo principal. Também `ALIEN_REVIEW_MODEL` e, na extensão, `alien.reviewModel` |
 | `--review` | liga a revisão por um agente crítico (padrão: desligada; medido: mesmo acerto e 19–38% menos tokens sem ela, com a checagem de escopo e o portão de verificação sempre ativos) |
 | `--max-steps <n>` | limite de passos por agente (padrão 80) |
 | `--budget <tokens>` | para quando o consumo total passar do limite |

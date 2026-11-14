@@ -5,7 +5,7 @@ import type { Criterion } from './contract.js';
 import { MemoryStore } from './memory.js';
 import { findSkills, type Skill } from './skills.js';
 import { reviewSkills, type ReviewInput } from './skill-review.js';
-import type { Role } from './prompts.js';
+import { CRITIC_INSTRUCTIONS, type Role } from './prompts.js';
 import { AnthropicProvider, type Effort } from './providers/anthropic.js';
 import { alienHome } from './paths.js';
 import { OllamaProvider } from './providers/ollama.js';
@@ -34,6 +34,7 @@ export interface Config {
   root: string;
   maxSteps: number;
   review: boolean;
+  reviewModel?: string;
   effort: Effort;
   numCtx: number;
   embedModel: string;
@@ -171,7 +172,7 @@ export class Session {
     fs.appendFileSync(this.logFile, `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`);
   }
 
-  async viaSdk(task: string, ui: AgentUI, extra: Pick<SdkRun, 'resume' | 'tools' | 'outputSchema'> & { role?: Role } = {}): Promise<SdkResult> {
+  async viaSdk(task: string, ui: AgentUI, extra: Partial<Pick<SdkRun, 'resume' | 'tools' | 'outputSchema' | 'provider' | 'model'>> & { role?: Role } = {}): Promise<SdkResult> {
     const { role, ...rest } = extra;
     const readOnly = role === 'explorer' || role === 'critic';
     const run: SdkRun = {
@@ -204,12 +205,13 @@ export class Session {
     const evidence = diff
       ? `The current changes (git diff HEAD plus the full content of new files) are below, so you do not need to run git diff or re-read the new files. Read surrounding code only where you need it, then verify.\n\`\`\`diff\n${diff}\n\`\`\``
       : 'Start with git status and git diff (including untracked files), then inspect and verify.';
-    const feedback = await this.spawn(
-      'critic',
-      `The user asked for:\n${goal}\n\nAnother agent says it is done. You get no explanation from it on purpose: judge only the request and the actual changes. ${evidence}`,
-      parent,
-    );
-    return { approved: !/CHANGES_REQUESTED/.test(feedback), feedback };
+    const task = `The user asked for:\n${goal}\n\nAnother agent says it is done. You get no explanation from it on purpose: judge only the request and the actual changes. ${evidence}`;
+    const model = this.cfg.reviewModel;
+    const feedback = model
+      ? (await this.viaSdk(`${CRITIC_INSTRUCTIONS}\n\n${task}`, parent.child(`critic#${++this.spawned} ${model}`), { role: 'critic', provider: 'anthropic', model })).answer
+      : await this.spawn('critic', task, parent);
+    const verdict = /<evaluation>\s*(\w+)\s*<\/evaluation>/.exec(feedback)?.[1];
+    return { approved: verdict === 'PASS', feedback: /<feedback>([\s\S]*?)<\/feedback>/.exec(feedback)?.[1]?.trim() || feedback };
   }
 
   reviewSkills(input: Omit<ReviewInput, 'turns'>): void {

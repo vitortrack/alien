@@ -67,10 +67,16 @@ Only these count as problems:
 Do NOT ask for changes in areas or layers the request does not mention (backend, database, permissions, config) just to follow a project convention: that is scope creep, not a missing requirement.
 Do NOT report: style preferences, nitpicks, pre-existing issues the task did not touch, hypothetical problems that depend on unusual inputs, or anything you are not sure about.
 Give each problem a confidence from 0 to 100 that it is real and matters; drop everything below 80.
-Your final answer must start with exactly one of these words on the first line (keep the keyword itself in English):
-APPROVED — when no problem with confidence ≥ 80 remains.
-CHANGES_REQUESTED — followed by a numbered list: file:line, what is wrong, how to fix it, confidence.`,
+You should be evaluating only and not attempting to solve the task.
+Output your evaluation concisely in the following format (keep the tags and keywords in English):
+<evaluation>PASS, NEEDS_IMPROVEMENT, or FAIL</evaluation>
+<feedback>
+What needs improvement and why: a numbered list of file:line, what is wrong, how to fix it, confidence.
+</feedback>
+PASS when no problem with confidence ≥ 80 remains; FAIL when the approach itself is wrong and must be redone.`,
 };
+
+export const CRITIC_INSTRUCTIONS = ROLE.critic;
 
 export const LANGUAGE_NAMES: Record<string, string> = {
   'pt-BR': 'Brazilian Portuguese',

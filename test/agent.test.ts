@@ -108,12 +108,14 @@ test('reflection: a reviewer rejection sends the agent back to work, then approv
     () => answer('first attempt'),
     ({ user }) => {
       assert.match(user.at(-1)!, /requested changes/);
+      assert.match(user.at(-1)!, /1\. a\.txt must say v2/);
+      assert.doesNotMatch(user.at(-1)!, /<evaluation>/);
       return call('write_file', { path: 'a.txt', content: 'v2' });
     },
     () => answer('fixed'),
   ]);
   const critic = () =>
-    new ScriptedProvider([() => answer(++reviews === 1 ? 'CHANGES_REQUESTED\n1. a.txt must say v2' : 'APPROVED')]);
+    new ScriptedProvider([() => answer(++reviews === 1 ? '<evaluation>NEEDS_IMPROVEMENT</evaluation>\n<feedback>1. a.txt must say v2</feedback>' : '<evaluation>PASS</evaluation>\n<feedback></feedback>')]);
   const providers = [main];
   const ui = UI.create();
   const session = new Session(config(root, { review: true }), ui, () => providers.shift() ?? critic());
@@ -479,6 +481,55 @@ test('sessions are saved after each task, resumed with their history and forked 
   assert.equal(second.sessions.load(second.id)!.turns.length, 2);
   assert.match(new Session(config(root, { provider: 'anthropic' }), ui, () => new ScriptedProvider([])).resume(saved)!, /--provider ollama/);
   ui.close();
+});
+
+test('on a follow-up like "pode continuar", the reviewer and the requirements check get every request of the conversation', async () => {
+  const root = workspace();
+  const goals: string[] = [];
+  const nudges: string[] = [];
+  const reply = ({ user }: { user: string[] }): StepResult => {
+    nudges.push(user.at(-1)!);
+    return answer('feito');
+  };
+  const main = new ScriptedProvider([() => answer('vou começar'), () => call('write_file', { path: 'src/a.js', content: 'export const a = 2;\n' }), reply, reply, reply, reply, reply, reply, reply]);
+  const critic = () =>
+    new ScriptedProvider([
+      ({ user }) => {
+        goals.push(user[0]!);
+        return answer('<evaluation>PASS</evaluation>\n<feedback></feedback>');
+      },
+    ]);
+  const providers = [main];
+  const ui = UI.create();
+  const session = new Session(config(root, { review: true }), ui, () => providers.shift() ?? critic());
+  try {
+    await session.run('escreva a = 2 em src/a.js');
+    await session.run('pode continuar');
+  } finally {
+    ui.close();
+  }
+  assert.match(nudges.find((n) => n.startsWith('[requirements]'))!, /escreva a = 2 em src\/a\.js[\s\S]*pode continuar/);
+  assert.match(goals[0]!, /escreva a = 2 em src\/a\.js/);
+});
+
+test('with reviewModel set, the review runs on that Claude model through the Agent SDK, read-only, with the reviewer instructions', async () => {
+  const root = workspace();
+  const main = new ScriptedProvider([() => call('write_file', { path: 'a.txt', content: 'v2' }), () => answer('feito'), () => answer('feito')]);
+  const ui = UI.create();
+  const session = new Session(config(root, { review: true, reviewModel: 'claude-opus-5-5' }), ui, () => main);
+  const calls: { task: string; extra: Record<string, unknown> }[] = [];
+  session.viaSdk = async (task, _ui, extra = {}) => {
+    calls.push({ task, extra });
+    return { answer: '<evaluation>PASS</evaluation>\n<feedback></feedback>', sessionId: 's', usage: { input: 0, output: 0 } } as Awaited<ReturnType<Session['viaSdk']>>;
+  };
+  try {
+    assert.equal(await session.run('escreva v2 em a.txt'), 'feito');
+  } finally {
+    ui.close();
+  }
+  assert.equal(calls.length, 1);
+  assert.deepEqual([calls[0]!.extra.role, calls[0]!.extra.provider, calls[0]!.extra.model], ['critic', 'anthropic', 'claude-opus-5-5']);
+  assert.match(calls[0]!.task, /independent reviewer[\s\S]*<evaluation>PASS, NEEDS_IMPROVEMENT, or FAIL[\s\S]*escreva v2 em a\.txt/);
 });
 
 test('verification gate asks once to run something after unverified code edits', async () => {
